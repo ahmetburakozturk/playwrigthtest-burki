@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <filter id="swPureGlowApp" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- En Dış Sınır: Kesikli Çizgi Dış Border (Açık Mavi) -->
+  <circle cx="64" cy="64" r="56" stroke="#0dcaf0" stroke-width="8" stroke-dasharray="12 9" stroke-linecap="round" />
+
+  <!-- Kesikli Çizgi İç Dolgu (Beyaz) -->
+  <circle cx="64" cy="64" r="56" stroke="#ffffff" stroke-width="3.5" stroke-dasharray="12 9" stroke-linecap="round" filter="url(#swPureGlowApp)" />
+
+  <!-- Ortadaki Şekil (İçi Beyaz, Dışı Açık Mavi Border) -->
+  <path d="M 49 38 C 49 35.8 51.5 34.5 53.4 35.7 L 85 54.7 C 87 56 87 59 85 60.3 L 73 67.5 L 77.5 80.5 C 78.2 82.2 76.2 83.6 74.8 82.5 L 49.5 62.8 C 49.2 62.3 49 61.7 49 61 Z"
+        fill="#ffffff"
+        stroke="#0dcaf0"
+        stroke-width="3.5"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        filter="url(#swPureGlowApp)" />
+</svg>

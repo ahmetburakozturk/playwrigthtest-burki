@@ -1,0 +1,6 @@
+﻿bin/
+obj/
+browsers/
+.playwright/
+*.mp4
+*.zip

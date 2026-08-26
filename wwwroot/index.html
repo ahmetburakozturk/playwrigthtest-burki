@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>PlaywrightSmartRecorder</title>
+    <base href="/" />
+    <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="PlaywrightSmartRecorder.styles.css" />
+    <link rel="icon" href="data:,">
+    
+    <!-- Prism.js Koyu Tema (VS Code benzeri) -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+</head>
+<body>
+    <div class="status-bar-safe-area"></div>
+
+    <div id="app">Loading...</div>
+
+    <div id="blazor-error-ui" data-nosnippet>
+        An unhandled error has occurred.
+        <a href="." class="reload">Reload</a>
+        <span class="dismiss">🗙</span>
+    </div>
+
+    <!-- Blazor Core Script -->
+    <script src="_framework/blazor.webview.js" autostart="false"></script>
+
+    <!-- Prism.js Kütüphaneleri ve Tetikleyici -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+    <script>
+        // Blazor'dan gelen kodu alır, ekrana yazar ve sadece o kısmı renklendirir
+        window.highlightCode = function (newCode) {
+            var codeBlock = document.querySelector('code.language-typescript');
+            if (codeBlock) {
+                codeBlock.textContent = newCode; // Metni güvenle ekle
+                Prism.highlightElement(codeBlock); // Prism ile renklendir
+            }
+        };
+
+        window.downloadFile = function (filename, content) {
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        };
+    </script>
+</body>
+</html>

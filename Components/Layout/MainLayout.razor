@@ -1,0 +1,180 @@
+﻿@inherits LayoutComponentBase
+@inject PlaywrightSmartRecorder.Core.Services.LogService LogService
+
+<div class="@(isDarkMode ? "bg-dark text-light" : "bg-light text-dark")" style="min-height: 100vh; transition: background-color 0.4s ease, color 0.4s ease;">
+    
+    <!-- Üst Bar (Header) -->
+    <header class="p-3 border-bottom @(isDarkMode ? "border-secondary border-opacity-50 bg-dark" : "border-secondary-subtle bg-white") shadow-sm d-flex align-items-center justify-content-between px-4">
+        
+        <!-- Sol: Kullanım Kılavuzu Butonu -->
+        <div>
+            <button class="btn btn-sm px-3 rounded-pill d-flex align-items-center gap-2 fw-semibold @(isDarkMode ? "btn-outline-light border-secondary text-light" : "btn-outline-dark border-secondary-subtle") shadow-sm" 
+                    @onclick="OpenGuideModal">
+                <span>📖</span> Kullanım Kılavuzu
+            </button>
+        </div>
+
+        <!-- Orta: SenseWright Başlık ve Vektör Logo -->
+        <div class="text-center d-flex flex-column align-items-center">
+            <div class="d-flex align-items-center gap-2">
+                
+                <!-- SenseWright Vektör Logosu -->
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="36" height="36" class="shadow-sm">
+                  <defs>
+                    <filter id="swPureGlowLayout" x="-30%" y="-30%" width="160%" height="160%">
+                      <feGaussianBlur stdDeviation="3" result="blur" />
+                      <feMerge>
+                        <feMergeNode in="blur" />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
+                  </defs>
+                  <circle cx="64" cy="64" r="56" fill="none" stroke="#0dcaf0" stroke-width="8" stroke-dasharray="12 9" stroke-linecap="round" />
+                  <circle cx="64" cy="64" r="56" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-dasharray="12 9" stroke-linecap="round" filter="url(#swPureGlowLayout)" />
+                  <path d="M 49 38 C 49 35.8 51.5 34.5 53.4 35.7 L 85 54.7 C 87 56 87 59 85 60.3 L 73 67.5 L 77.5 80.5 C 78.2 82.2 76.2 83.6 74.8 82.5 L 49.5 62.8 C 49.2 62.3 49 61.7 49 61 Z"
+                        fill="#ffffff" stroke="#0dcaf0" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round" filter="url(#swPureGlowLayout)" />
+                </svg>
+
+                <h1 class="h3 mb-0 fw-bold" style="background: linear-gradient(135deg, #0d6efd 0%, #0dcaf0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px;">
+                    SenseWright
+                </h1>
+            </div>
+            <small class="@(isDarkMode ? "text-light opacity-75" : "text-muted")" style="font-size: 0.78rem; letter-spacing: 0.2px;">
+                Akıllı & Bağlama Duyarlı Playwright Test Kaydedici
+            </small>
+        </div>
+
+        <!-- Sağ: Dinamik Ampul/Ay Etiketli Tema Switch -->
+        <div class="d-flex align-items-center gap-2 user-select-none">
+            <span class="fw-semibold me-1" style="font-size: 0.85rem;">
+                @(isDarkMode ? "🌙 Gece Modu" : "💡 Gündüz Modu")
+            </span>
+            <label class="theme-switch" title="Karanlık/Aydınlık Mod">
+                <input type="checkbox" checked="@isDarkMode" @onchange="ToggleTheme">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </header>
+
+    <!-- Ana İçerik Alanı -->
+    <main class="container-fluid px-4 py-3">
+        <CascadingValue Value="isDarkMode">
+            @Body
+        </CascadingValue>
+    </main>
+
+</div>
+
+<!-- BLUR / KARARTMALI SAF BLAZOR KULLANIM KILAVUZU MODALI -->
+@if (isGuideModalOpen)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);" role="dialog">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content @(isDarkMode ? "bg-dark text-white border-secondary" : "bg-white text-dark") shadow-lg rounded-4">
+                <div class="modal-header border-bottom @(isDarkMode ? "border-secondary" : "border-light") py-3">
+                    <h5 class="modal-title fw-bold d-flex align-items-center gap-2">
+                        <span style="color: #0dcaf0;">⚡</span> SenseWright Kullanım & Mimari Kılavuzu
+                    </h5>
+                    <button type="button" class="btn-close @(isDarkMode ? "btn-close-white" : "")" @onclick="CloseGuideModal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+
+                    <!-- 1. HIZLI BAŞLANGIÇ -->
+                    <div class="card mb-3 border-0 shadow-sm @(isDarkMode ? "bg-black text-light border border-secondary border-opacity-25" : "bg-light text-dark")">
+                        <div class="card-body p-3">
+                            <h6 class="fw-bold text-primary d-flex align-items-center gap-2 mb-2">
+                                <span>🚀</span> Hızlı Başlangıç
+                            </h6>
+                            <ol class="small mb-0 ps-3 opacity-90" style="line-height: 1.6;">
+                                <li>Test etmek istediğiniz web sitesinin adresini URL kutusuna yazın.</li>
+                                <li><strong>Kaydı Başlat</strong> butonuna basarak otomatik tarayıcıyı açın.</li>
+                                <li>Ekranda gerçekleştirdiğiniz tıklama ve gezinti adımları anlık olarak koda dönüştürülür.</li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <!-- 2. AKILLI MOTOR YETENEKLERİ -->
+                    <div class="card mb-3 border-0 shadow-sm @(isDarkMode ? "bg-black text-light border border-secondary border-opacity-25" : "bg-light text-dark")">
+                        <div class="card-body p-3">
+                            <h6 class="fw-bold text-info d-flex align-items-center gap-2 mb-2">
+                                <span>🧠</span> Akıllı Otomasyon Özellikleri
+                            </h6>
+                            <ul class="list-unstyled small mb-0 opacity-90">
+                                <li class="mb-2 d-flex align-items-start gap-2">
+                                    <span class="text-success fw-bold">✓</span>
+                                    <div><strong>Dinamik Bekleme (Auto-Wait):</strong> Statik <code>Thread.Sleep</code> kullanılmaz. Sayfa geçişleri ve AJAX/Fetch istekleri <code>Promise.all</code> ile otomatik sarmalanır.</div>
+                                </li>
+                                <li class="mb-2 d-flex align-items-start gap-2">
+                                    <span class="text-success fw-bold">✓</span>
+                                    <div><strong>Gürültüsüz Hover Filtresi:</strong> Gezinti esnasında oluşan gereksiz fare hareketleri elenir; sadece tıklama öncesi kritik menü hover'ları koda yazılır.</div>
+                                </li>
+                                <li class="d-flex align-items-start gap-2">
+                                    <span class="text-success fw-bold">✓</span>
+                                    <div><strong>Otomatik Dialog Yönetimi:</strong> Tarayıcı seviyesindeki Alert/Confirm uyarıları kaydı dondurmaz, otomatik olarak onaylanıp test senaryosuna eklenir.</div>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- 3. TARAYICI İÇİ KONTROL PANELİ -->
+                    <div class="card mb-3 border-0 shadow-sm @(isDarkMode ? "bg-black text-light border border-secondary border-opacity-25" : "bg-light text-dark")">
+                        <div class="card-body p-3">
+                            <h6 class="fw-bold text-warning d-flex align-items-center gap-2 mb-2">
+                                <span>🎛️</span> Tarayıcı Yüzen Araç Çubuğu (Widget)
+                            </h6>
+                            <p class="small opacity-90 mb-2">Açılan Chrome sayfasının sağ üst köşesindeki yüzen panel ile:</p>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <span class="badge bg-secondary p-2 small">⏸️ Duraklat / Devam Et: Hassas veri girişlerini kaydetmez</span>
+                                <span class="badge bg-danger p-2 small">⏹️ Bitir: Kaydı durdurup tarayıcıyı kapatır</span>
+                                <span class="badge bg-dark border border-secondary p-2 small">🔍 Canlı Tooltip: İmleç altındaki elemanın locator'ını gösterir</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. DIŞA AKTARMA VE DESTEK -->
+                    <div class="card border-0 shadow-sm @(isDarkMode ? "bg-black text-light border border-secondary border-opacity-25" : "bg-light text-dark")">
+                        <div class="card-body p-3">
+                            <h6 class="fw-bold text-success d-flex align-items-center gap-2 mb-2">
+                                <span>💾</span> Kopyalama, Kaydetme ve Destek
+                            </h6>
+                            <p class="small opacity-90 mb-2">
+                                Üretilen TypeScript kodunu <strong>Kopyala</strong> veya <strong>Kaydet</strong> butonları ile alabilirsiniz. Kaydedilen dosyalar benzersiz zaman damgasıyla kaydedilir.
+                            </p>
+                            <div class="pt-2 border-top @(isDarkMode ? "border-secondary" : "border-light-subtle")">
+                                <button class="btn btn-outline-warning btn-sm rounded-pill fw-semibold" @onclick="LogService.OpenLogFolder">
+                                    📁 Hata Log Klasörünü Aç
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+                <div class="modal-footer border-top @(isDarkMode ? "border-secondary" : "border-light")">
+                    <button type="button" class="btn btn-secondary btn-sm rounded-pill px-4" @onclick="CloseGuideModal">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool isDarkMode;
+    private bool isGuideModalOpen = false;
+
+    protected override void OnInitialized()
+    {
+        isDarkMode = Microsoft.Maui.Storage.Preferences.Default.Get("IsDarkMode", true);
+    }
+
+    private void ToggleTheme(ChangeEventArgs e)
+    {
+        if (e.Value is bool newValue)
+        {
+            isDarkMode = newValue;
+            Microsoft.Maui.Storage.Preferences.Default.Set("IsDarkMode", isDarkMode);
+        }
+    }
+
+    private void OpenGuideModal() => isGuideModalOpen = true;
+    private void CloseGuideModal() => isGuideModalOpen = false;
+}

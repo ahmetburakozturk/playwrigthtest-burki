@@ -1,0 +1,352 @@
+﻿@page "/"
+@using PlaywrightSmartRecorder.Core.Models
+@using PlaywrightSmartRecorder.Parser
+@inject PlaywrightRecorderService RecorderService
+@inject TypeScriptGenerator TsGenerator
+@inject IJSRuntime JSRuntime
+@inject PlaywrightSmartRecorder.Core.Services.LogService LogService
+@implements IDisposable
+
+<div class="row g-4 m-0" style="height: calc(100vh - 120px); width: 100%;">
+
+    <!-- SOL PANEL: Kontroller ve İşlem Geçmişi -->
+    <div class="col-lg-6 d-flex flex-column h-100 ps-0 pe-lg-3">
+        
+        <div class="card shadow-sm rounded-4 mb-3 flex-shrink-0 @(IsDarkMode ? "bg-dark text-white border border-secondary border-opacity-50" : "bg-white text-dark border border-secondary-subtle")">
+            <div class="card-body p-4">
+                
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="alert alert-danger shadow-sm rounded-3 border-start border-danger border-4">
+                        <strong>Hata:</strong> @errorMessage
+                    </div>
+                }
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold @(IsDarkMode ? "text-light" : "text-secondary")">Hedef Uygulama URL <span class="text-danger">*</span></label>
+                    <input type="url" class="form-control form-control-lg shadow-sm @(IsDarkMode ? "border-secondary bg-dark text-white" : "border-secondary-subtle bg-light text-dark")" 
+                           @bind="targetUrl" disabled="@isRecording" />
+                </div>
+
+                <div class="d-grid gap-3 d-md-flex justify-content-md-center">
+                    @if (!isRecording)
+                    {
+                        <button class="btn btn-primary btn-lg px-4 rounded-pill shadow-sm border border-primary-subtle fw-bold d-flex align-items-center gap-2" @onclick="StartRecording">
+                            <span>▶</span> Kaydı Başlat
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-danger btn-lg px-4 rounded-pill shadow-sm border border-danger-subtle fw-bold d-flex align-items-center gap-2" @onclick="StopRecording">
+                            <span>■</span> Kaydı Durdur
+                        </button>
+                    }
+                </div>
+
+                @if (isRecording)
+                {
+                    <div class="mt-3 alert alert-success d-flex align-items-center shadow-sm rounded-3 border @(IsDarkMode ? "bg-black border-success text-success" : "border-success-subtle")">
+                        <div class="spinner-border spinner-border-sm text-success me-3"></div>
+                        <div><strong>Kayıt Devam Ediyor...</strong></div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="card shadow-sm rounded-4 d-flex flex-column flex-grow-1 overflow-hidden mb-3 @(IsDarkMode ? "bg-dark text-white border border-secondary border-opacity-50" : "bg-white text-dark border border-secondary-subtle")">
+            <div class="card-header border-bottom @(IsDarkMode ? "border-secondary border-opacity-50 bg-dark" : "border-secondary-subtle bg-transparent") pt-3 pb-2 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold d-flex align-items-center gap-2">
+                    <span>⏱️</span> İşlem Geçmişi
+                    @if (recordedActions.Any())
+                    {
+                        <span class="badge @(IsDarkMode ? "bg-secondary border border-light border-opacity-25" : "bg-light text-dark border border-secondary-subtle") rounded-pill">
+                            @recordedActions.Count İşlem
+                        </span>
+                    }
+                </h5>
+                @if (recordedActions.Any())
+                {
+                    <button class="btn btn-sm btn-outline-danger rounded-pill fw-semibold shadow-sm d-flex align-items-center gap-1" @onclick="ClearHistory">
+                        <span>🧹</span> Temizle
+                    </button>
+                }
+            </div>
+            
+            <div class="card-body p-0 overflow-auto">
+                @if (!recordedActions.Any())
+                {
+                    <div class="d-flex h-100 flex-column align-items-center justify-content-center text-center p-4 @(IsDarkMode ? "text-secondary" : "text-muted")">
+                        <span style="font-size: 2.5rem; opacity: 0.5;">📭</span>
+                        <h6 class="mt-2 fw-semibold">Kayıtlı İşlem Yok</h6>
+                        <p class="mb-0 small">Aksiyonları görüntülemek için kaydı başlatın.</p>
+                    </div>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush rounded-bottom-4">
+                        @for (int i = 0; i < recordedActions.Count; i++)
+                        {
+                            var action = recordedActions[i];
+                            var stepNumber = recordedActions.Count - i; 
+
+                            <li class="list-group-item d-flex align-items-center gap-3 p-3 @(IsDarkMode ? "bg-dark text-light border-secondary border-opacity-50" : "bg-white border-light-subtle")">
+                                <div class="rounded-circle d-flex align-items-center justify-content-center shadow-sm fw-bold bg-success text-white border border-success-subtle" 
+                                     style="width: 32px; height: 32px; font-size: 0.85rem; flex-shrink: 0;">
+                                    @stepNumber
+                                </div>
+                                
+                                <div class="flex-grow-1 overflow-hidden">
+                                    <div class="d-flex w-100 justify-content-between align-items-center">
+                                        <h6 class="mb-0 fw-bold @(IsDarkMode ? "text-info" : "text-primary")">@action.ActionType</h6>
+                                        <small class="@(IsDarkMode ? "text-secondary" : "text-muted")">@action.Timestamp.ToString("HH:mm:ss")</small>
+                                    </div>
+                                    <div class="small opacity-75 mt-1 text-truncate" style="font-family: Consolas, monospace;">
+                                        Olay başarıyla yakalandı.
+                                    </div>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- SAĞ PANEL: Canlı Önizleme (IDE View) -->
+    <div class="col-lg-6 d-flex flex-column h-100 ps-lg-3 pe-0">
+        <div class="card shadow-sm rounded-4 d-flex flex-column flex-grow-1 overflow-hidden mb-3 @(IsDarkMode ? "bg-dark text-white border border-secondary border-opacity-50" : "bg-white text-dark border border-secondary-subtle")">
+            
+            <div class="card-header border-bottom @(IsDarkMode ? "border-secondary border-opacity-50 bg-dark" : "border-secondary-subtle bg-transparent") py-3 d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center gap-2">
+                    <h5 class="mb-0 fw-bold d-flex align-items-center gap-2">
+                        <span style="color: #3178c6;">TS</span> TypeScript Kodu
+                    </h5>
+                    <span class="badge bg-primary rounded-pill shadow-sm ms-2 border border-primary-subtle">Canlı Önizleme</span>
+                </div>
+
+                <div class="d-flex align-items-center gap-2">
+                    <button class="btn btn-sm px-3 rounded-pill shadow-sm d-flex align-items-center gap-2 fw-semibold @(isCopied ? "btn-success text-white" : (IsDarkMode ? "btn-outline-light border-secondary" : "btn-outline-dark border-secondary-subtle"))" 
+                            @onclick="CopyCode" title="Kodu Pano'ya Kopyala">
+                        <span>@(isCopied ? "✔️" : "📋")</span> @(isCopied ? "Kopyalandı!" : "Kopyala")
+                    </button>
+                    <button class="btn btn-sm px-3 rounded-pill shadow-sm d-flex align-items-center gap-2 fw-semibold @(isSaved ? "btn-success text-white" : "btn-primary border border-primary-subtle")" 
+                            @onclick="SaveCode" title="Kodu Dosyaya Kaydet">
+                        <span>@(isSaved ? "✔️" : "💾")</span> @(isSaved ? "Kaydedildi!" : "Kaydet")
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Kod Editörü Alanı -->
+            <div class="card-body p-0 d-flex flex-column h-100 position-relative" style="background-color: #1e1e1e;">
+                <pre class="m-0 p-4 h-100" style="overflow-auto; font-family: 'Fira Code', Consolas, monospace; font-size: 0.95rem; line-height: 1.5;"><code class="language-typescript"></code></pre>
+            </div>
+
+        </div>
+    </div>
+
+</div>
+
+@code {
+    [CascadingParameter]
+    public bool IsDarkMode { get; set; }
+
+    private string targetUrl = ""; 
+    private bool isRecording = false;
+    private string? errorMessage = null;
+    
+    private List<UserAction> recordedActions = new();
+    private string generatedCode = "";
+    private bool shouldHighlight = false;
+    private bool isCopied = false;
+    private bool isSaved = false;
+
+    protected override void OnInitialized()
+    {
+        targetUrl = Microsoft.Maui.Storage.Preferences.Default.Get("LastTargetUrl", "https://onedeskconfprp.turkcell.com.tr/account/login");
+
+        RecorderService.OnActionRecorded += HandleActionRecorded;
+        RecorderService.OnRecordingStopped += HandleRecordingStopped;
+        UpdateGeneratedCode(); 
+    }
+
+    private void HandleRecordingStopped()
+    {
+        InvokeAsync(() =>
+        {
+            isRecording = false;
+            StateHasChanged();
+        });
+    }
+
+    private void HandleActionRecorded(UserAction action)
+    {
+        InvokeAsync(() => 
+        {
+            try 
+            {
+                recordedActions.Insert(0, action);
+                UpdateGeneratedCode();
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                // UI çökmesin diye hatayı yut ve konsola yaz
+                System.Diagnostics.Debug.WriteLine($"Kayıt eklenirken hata: {ex.Message}");
+            }
+        });
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender || shouldHighlight)
+        {
+            shouldHighlight = false;
+            // Eski isim yerine yeni oluşturduğumuz parametresiz fonksiyonu çağırıyoruz
+            await JSRuntime.InvokeVoidAsync("highlightCode");
+        }
+    }
+
+    private void UpdateGeneratedCode()
+    {
+        try 
+        {
+            // ÇÖZÜM BURADA: Arayüz için ters tuttuğumuz listeyi, kod üreticiye kronolojik (düz) sırayla veriyoruz
+            var chronologicalActions = recordedActions.AsEnumerable().Reverse().ToList();
+            generatedCode = TsGenerator.Generate(chronologicalActions);
+            
+            // Renklendirme işlemi
+            _ = Task.Run(async () => 
+            {
+                await Task.Delay(100); 
+                await InvokeAsync(async () => {
+                    try 
+                    {
+                        await JSRuntime.InvokeVoidAsync("highlightCode", generatedCode);
+                    } 
+                    catch { /* JS hazır değilse yut */ }
+                });
+            });
+        }
+        catch (Exception ex)
+        {
+            generatedCode = $"// Kod çevirici hatası: {ex.Message}";
+        }
+    }
+
+    private async Task StartRecording()
+    {
+        if (string.IsNullOrWhiteSpace(targetUrl)) return;
+
+        Microsoft.Maui.Storage.Preferences.Default.Set("LastTargetUrl", targetUrl);
+
+        isRecording = true;
+        errorMessage = null;
+        recordedActions.Clear(); 
+        UpdateGeneratedCode(); 
+        StateHasChanged();
+
+        _ = Task.Run(async () => 
+        {
+            try { await RecorderService.StartRecordingAsync(targetUrl); }
+            catch (Exception ex)
+            {
+                await InvokeAsync(() =>
+                {
+                    errorMessage = $"Tarayıcı başlatılamadı: {ex.Message}";
+                    isRecording = false;
+                    StateHasChanged();
+                });
+            }
+        });
+    }
+
+    private async Task StopRecording()
+    {
+        isRecording = false;
+        await RecorderService.StopRecordingAsync();
+        StateHasChanged();
+    }
+
+    private async Task CopyCode()
+    {
+        if (string.IsNullOrWhiteSpace(generatedCode)) return;
+
+        await Microsoft.Maui.ApplicationModel.DataTransfer.Clipboard.Default.SetTextAsync(generatedCode);
+
+        isCopied = true;
+        StateHasChanged();
+
+        await Task.Delay(2000);
+
+        isCopied = false;
+        StateHasChanged();
+    }
+
+    private async Task SaveCode()
+    {
+        if (string.IsNullOrWhiteSpace(generatedCode)) return;
+
+        try
+        {
+            // Benzersiz dosya adı için anlık tarih-saat damgası (Örn: smart_test_16292425082026.spec.ts)
+            string timeStamp = DateTime.Now.ToString("HHmmssddMMyyyy");
+            string fileName = $"smart_test_{timeStamp}.spec.ts";
+
+            #if WINDOWS
+            var savePicker = new Windows.Storage.Pickers.FileSavePicker();
+            // Varsayılan açılış konumunu 'Belgelerim' (Documents) yapıyoruz
+            savePicker.SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary;
+            
+            savePicker.FileTypeChoices.Add("TypeScript Test Dosyası (*.ts)", new List<string>() { ".ts" });
+            savePicker.FileTypeChoices.Add("Tüm Dosyalar (*.*)", new List<string>() { "." });
+            savePicker.SuggestedFileName = fileName;
+
+            var window = Microsoft.Maui.Controls.Application.Current?.Windows.FirstOrDefault()?.Handler?.PlatformView as Microsoft.UI.Xaml.Window;
+            if (window != null)
+            {
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+                WinRT.Interop.InitializeWithWindow.Initialize(savePicker, hwnd);
+            }
+
+            var file = await savePicker.PickSaveFileAsync();
+            if (file != null)
+            {
+                await Windows.Storage.FileIO.WriteTextAsync(file, generatedCode);
+                
+                isSaved = true;
+                StateHasChanged();
+                await Task.Delay(2000);
+                isSaved = false;
+                StateHasChanged();
+            }
+            #else
+                        // Windows dışı platformlar için doğrudan Documents klasörüne kayıt
+                        string defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), fileName);
+                        await File.WriteAllTextAsync(defaultPath, generatedCode);
+                        
+                        isSaved = true;
+                        StateHasChanged();
+                        await Task.Delay(2000);
+                        isSaved = false;
+                        StateHasChanged();
+            #endif
+        }
+        catch (Exception ex)
+        {
+            LogService.LogError("Dosya kaydedilirken hata oluştu.", ex);
+        }
+    }
+
+    public void Dispose()
+    {
+        RecorderService.OnActionRecorded -= HandleActionRecorded;
+        RecorderService.OnRecordingStopped -= HandleRecordingStopped;
+    }
+
+    private void ClearHistory()
+    {
+        recordedActions.Clear();
+        UpdateGeneratedCode();
+        StateHasChanged();
+    }
+}
