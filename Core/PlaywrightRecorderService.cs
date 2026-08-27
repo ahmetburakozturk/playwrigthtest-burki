@@ -16,6 +16,7 @@ namespace PlaywrightSmartRecorder.Core
         private IPage? _page;
         private int _pageCounter = 0;
         private bool _isFirstPage = true;
+        private readonly Dictionary<IPage, string> _pageAliases = new();
 
         public event Action<UserAction>? OnActionRecorded;
         public event Action? OnRecordingStopped;
@@ -51,6 +52,7 @@ namespace PlaywrightSmartRecorder.Core
                 _context = await _browser.NewContextAsync();
 
                 // 2. C# KÖPRÜSÜ
+                // 2. C# KÖPRÜSÜ
                 await _context.ExposeBindingAsync("smartRecorderEmit", (BindingSource source, string payload) =>
                 {
                     try
@@ -69,33 +71,57 @@ namespace PlaywrightSmartRecorder.Core
                             return;
                         }
 
-                        string pageAlias = source.Page == _page ? "page" : $"page{_pageCounter}";
+                        // --- YENİ GÜVENLİ SEKME EŞLEŞTİRME MANTIĞI ---
+                        string pageAlias = "page"; // Varsayılan olarak her zaman ana sayfa
+                        
+                        if (source.Page != null && _pageAliases.TryGetValue(source.Page, out string alias))
+                        {
+                            pageAlias = alias;
+                        }
+                        else if (_context != null && _context.Pages.Count > 1 && source.Page != _page)
+                        {
+                            // Eğer Playwright Page objesini eşleştiremezse (null gelirse) 
+                            // ve ortada birden fazla sekme varsa, mantıksal olarak en son açılan sekmeyi kabul et
+                            pageAlias = $"page{_pageCounter}";
+                        }
 
+                        // Gelen JSON'ı ilgili aksiyon modeline dönüştür
                         UserAction? action = actionType switch
                         {
-                            "Click" => JsonSerializer.Deserialize<ClickAction>(payload, options) switch { var a when a != null => a with { PageAlias = pageAlias }, _ => null },
-                            "Hover" => JsonSerializer.Deserialize<HoverAction>(payload, options) switch { var a when a != null => a with { PageAlias = pageAlias }, _ => null },
-                            "Input" => JsonSerializer.Deserialize<InputAction>(payload, options) switch { var a when a != null => a with { PageAlias = pageAlias }, _ => null },
-                            "Select" => JsonSerializer.Deserialize<SelectAction>(payload, options) switch { var a when a != null => a with { PageAlias = pageAlias }, _ => null },
-                            "Assert" => JsonSerializer.Deserialize<AssertAction>(payload, options) switch { var a when a != null => a with { PageAlias = pageAlias }, _ => null },
-                            "Keyboard" => JsonSerializer.Deserialize<KeyboardAction>(payload, options) switch { var a when a != null => a with { PageAlias = pageAlias }, _ => null },
+                            "Click" => JsonSerializer.Deserialize<ClickAction>(payload, options),
+                            "Hover" => JsonSerializer.Deserialize<HoverAction>(payload, options),
+                            "Input" => JsonSerializer.Deserialize<InputAction>(payload, options),
+                            "Select" => JsonSerializer.Deserialize<SelectAction>(payload, options),
+                            "Assert" => JsonSerializer.Deserialize<AssertAction>(payload, options),
+                            "Keyboard" => JsonSerializer.Deserialize<KeyboardAction>(payload, options),
+                            "Extract" => JsonSerializer.Deserialize<ExtractAction>(payload, options),
                             _ => null
                         };
-
-                        if (action != null) OnActionRecorded?.Invoke(action);
+                        
+                        // Alias'ı modele güvenli bir şekilde ata ve arayüze (Event) fırlat
+                        if (action != null) 
+                        {
+                            action = action with { PageAlias = pageAlias }; 
+                            OnActionRecorded?.Invoke(action);
+                        }
                     }
-                    catch (Exception ex) { Debug.WriteLine($"[JSON PARSE HATA] {ex.Message}"); }
+                    catch (Exception ex) 
+                    { 
+                        Debug.WriteLine($"[JSON PARSE HATA] {ex.Message}"); 
+                    }
                 });
 
-                // 3. V8 AJANI (WIDGET, TOOLTIP, ASSERT MODU VE TÜM EVENT DİNLEYİCİLERİ)
                 await _context.AddInitScriptAsync("""
                     if (!window.__smartRecorderInitialized) {
                         window.__smartRecorderInitialized = true;
                         
                         let isPaused = false;
                         let isAssertMode = false;
+                        
+                        // YENİ: Çift tıklama kalkanı için hedefleri hafızada tutuyoruz
+                        let lastActionTime = 0;
+                        let lastActionTarget = null;
 
-                        // --- YENİ: ELEMENTİN EKRANDAKİ SIRASINI/YAPISINI HESAPLAYAN FONKSİYON ---
                         const getCssPath = (el) => {
                             if (!(el instanceof Element)) return '';
                             let path = [];
@@ -117,21 +143,194 @@ namespace PlaywrightSmartRecorder.Core
                             return path.join(' > ');
                         };
 
+                        // YENİ VE GELİŞMİŞ: YANLIŞ TIKLAMA (MISCLICK) SENSÖRÜ
+                        const isInteractiveElement = (el) => {
+                            const interactiveTags = ['a', 'button', 'input', 'select', 'textarea', 'label', 'li', 'td', 'th', 'summary', 'option', 'tr'];
+                            const interactiveRoles = ['button', 'link', 'menuitem', 'option', 'tab', 'checkbox', 'radio', 'switch', 'treeitem', 'combobox'];
+
+                            let current = el;
+                            let depth = 0;
+                            
+                            // Menzili 3'ten 5'e çıkardık ki derin iç içe geçmiş kurumsal menüleri kaçırmasın
+                            while (current && current !== document.body && depth < 5) {
+                                // 1. Standart Etiket ve Rol Kontrolü
+                                const tag = current.tagName ? current.tagName.toLowerCase() : '';
+                                if (interactiveTags.includes(tag)) return true;
+
+                                const role = current.getAttribute ? current.getAttribute('role') : null;
+                                if (role && interactiveRoles.includes(role)) return true;
+
+                                // 2. Özel Kurumsal Özellik (Attribute) Kontrolü
+                                if (current.hasAttribute) {
+                                    if (current.hasAttribute('href') || current.hasAttribute('onclick') || 
+                                        current.hasAttribute('data-toggle') || current.hasAttribute('data-bs-toggle')) {
+                                        return true;
+                                    }
+                                }
+
+                                // 3. Özel SPA Sınıf (Class) Kontrolü
+                                const className = current.className && typeof current.className === 'string' ? current.className.toLowerCase() : '';
+                                if (className.includes('btn') || className.includes('menu') || className.includes('nav-link') || 
+                                    className.includes('dropdown-item') || className.includes('clickable')) {
+                                    return true;
+                                }
+
+                                // 4. Görsel Kontrol (Fare imleci)
+                                const style = window.getComputedStyle(current);
+                                if (style && style.cursor === 'pointer') return true;
+
+                                // Bir üst kapsayıcıya geç
+                                current = current.parentElement;
+                                depth++;
+                            }
+                            return false;
+                        };
+
                         const getElementInfo = (el) => {
+                            let elId = el.id || '';
+                            if (elId.includes('-result-') || (elId.startsWith('select2-') && elId.includes('-result'))) {
+                                elId = ''; 
+                            }
+
                             return {
-                                tag: el.tagName.toLowerCase(),
-                                elementId: el.id || '',
-                                textContent: (el.innerText || '').substring(0, 50).trim(),
+                                tag: el.tagName ? el.tagName.toLowerCase() : '',
+                                elementId: elId,
+                                // YENİ: \n (alt satır) ve fazladan boşlukları temizleyerek TS kodunun kırılmasını önler
+                                textContent: (el.innerText || '').replace(/\s+/g, ' ').substring(0, 50).trim(),
                                 placeholder: el.placeholder || '',
-                                ariaLabel: el.getAttribute('aria-label') || '',
+                                ariaLabel: el.getAttribute ? (el.getAttribute('aria-label') || '') : '',
                                 name: el.name || '',
-                                // Yeni eklenen özellikler JS payload'una dahil ediliyor
                                 cssSelector: getCssPath(el),
-                                isDynamicListElement: !!el.closest('tr, li') // Element bir tablo satırı veya liste içindeyse true döner
+                                customTestId: el.getAttribute ? (el.getAttribute('data-name') || el.getAttribute('data-testid') || '') : '',
+                                isDynamicListElement: el.closest ? !!el.closest('tr') : false
                             };
                         };
 
-                        window.addEventListener('DOMContentLoaded', () => {
+                        // AKILLI (AKRABA ELEMENT) TIKLAMA KALKANI
+                        const handleInteraction = (e, target) => {
+                            if (isPaused || !target || !e.isTrusted) return;
+                            if (target.closest && target.closest('#sr-widget-host')) return;
+                            
+                            const now = Date.now();
+                            
+                            // Akraba Element ve Gizli Checkbox Kalkanı
+                            if (lastActionTarget && (lastActionTarget === target || lastActionTarget.contains(target) || target.contains(lastActionTarget))) {
+                                if (now - lastActionTime < 800) return; 
+                            } else {
+                                if (now - lastActionTime < 100) return;
+                            }
+                            
+                            lastActionTime = now;
+                            lastActionTarget = target;
+
+                            const info = getElementInfo(target);
+
+                            if (isAssertMode) {
+                                e.preventDefault(); e.stopPropagation();
+                                window.smartRecorderEmit(JSON.stringify({ actionType: 'Assert', ...info }));
+                                isAssertMode = false;
+                                const btn = document.getElementById('sr-widget-host')?.shadowRoot?.getElementById('assertBtn');
+                                if (btn) {
+                                    btn.style.background = 'rgba(255,255,255,0.1)';
+                                    btn.innerHTML = '🎯 Doğrula';
+                                }
+                                return;
+                            }
+                            window.smartRecorderEmit(JSON.stringify({ actionType: 'Click', ...info }));
+                        };
+
+                        // YENİ: KOPYALAMA (CTRL+C / SAĞ TIK) SENSÖRÜ
+                        // Kullanıcı bir metni seçip kopyaladığında, bunu dinamik bir değişken olarak kaydeder.
+                        window.addEventListener('copy', (e) => {
+                            const selection = window.getSelection();
+                            const text = selection.toString().trim();
+                            
+                            if (!text || selection.rangeCount === 0) return;
+                            
+                            // Metnin bulunduğu asıl HTML elementini bul
+                            let node = selection.getRangeAt(0).commonAncestorContainer;
+                            let el = node.nodeType === 3 ? node.parentNode : node; // Text node ise kapsayıcıya çık
+                            
+                            const info = getElementInfo(el);
+                            
+                            console.log("[JS SENSEWRIGHT] Metin Kopyalandı. Değişkene atanıyor:", text);
+                            
+                            window.smartRecorderEmit(JSON.stringify({ 
+                                actionType: 'Extract', 
+                                ...info,
+                                extractedValue: text 
+                            }));
+                        }, { capture: true });
+
+                        // YENİ: HOVER (ÜZERİNDE BEKLEME / TOOLTIP AÇMA) SENSÖRÜ
+                        let hoverTimer = null;
+                        window.addEventListener('mouseover', (e) => {
+                            if (isPaused || !e.target) return;
+                            if (e.target.closest && e.target.closest('#sr-widget-host')) return;
+
+                            clearTimeout(hoverTimer);
+                            
+                            // Kullanıcı bir elementin üzerinde 800ms boyunca beklerse, bunu bir "Tooltip açma (Hover)" eylemi olarak kaydet
+                            hoverTimer = setTimeout(() => {
+                                const info = getElementInfo(e.target);
+                                // Boş alanları kaydetme
+                                if (info.textContent && info.textContent.trim().length > 0) {
+                                    console.log("[JS SENSEWRIGHT] Hover algılandı:", info.textContent);
+                                    window.smartRecorderEmit(JSON.stringify({ actionType: 'Hover', ...info }));
+                                }
+                            }, 800); 
+                        }, { capture: true, passive: true });
+
+                        window.addEventListener('mouseout', () => {
+                            clearTimeout(hoverTimer); // Fare elementten çıkarsa sayacı sıfırla
+                        }, { capture: true, passive: true });
+
+                        window.addEventListener('change', (e) => {
+                            if (isPaused || !e.target) return;
+                            const target = e.target;
+                            const info = getElementInfo(target);
+                            if (target.tagName === 'SELECT') {
+                                window.smartRecorderEmit(JSON.stringify({ actionType: 'Select', ...info, selectedValue: target.value }));
+                            } else if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+                                if (target.type === 'checkbox' || target.type === 'radio') return;
+                                window.smartRecorderEmit(JSON.stringify({ actionType: 'Input', ...info, value: target.value }));
+                            }
+                        }, { capture: true, passive: true });
+                        
+                        window.addEventListener('keydown', (e) => {
+                            if (isPaused || !e.target) return;
+                            if (e.key === 'Enter' || e.key === 'Escape') {
+                                const target = e.target;
+                                const info = getElementInfo(target);
+                                if (e.key === 'Enter' && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+                                    window.smartRecorderEmit(JSON.stringify({ actionType: 'Input', ...info, value: target.value }));
+                                }
+                                window.smartRecorderEmit(JSON.stringify({ actionType: 'Keyboard', key: e.key, ...info }));
+                            }
+                        }, { capture: true, passive: true });
+
+                        // YENİ: AÇILIR MENÜ (LI/OPTION) İÇİN ÖZEL MOUSEDOWN YAKALAYICI
+                        // Select2 gibi kütüphaneler click event'ini yuttuğu için seçimi mousedown ile garanti altına alıyoruz.
+                        window.addEventListener('mousedown', (e) => {
+                            if (!e.target) return;
+                            const isDropdownOption = e.target.tagName === 'LI' || 
+                                                     (e.target.closest && e.target.closest('li')) || 
+                                                     e.target.getAttribute('role') === 'option' || 
+                                                     e.target.getAttribute('role') === 'treeitem' || 
+                                                     (e.target.className && typeof e.target.className === 'string' && e.target.className.includes('option'));
+                            
+                            if (isDropdownOption) {
+                                handleInteraction(e, e.target);
+                            }
+                        }, { capture: true, passive: true });
+
+                        window.addEventListener('click', (e) => {
+                            handleInteraction(e, e.target);
+                        }, { capture: true });
+
+                        // WIDGET ÇİZİMİ
+                        setInterval(() => {
+                            if (!document.body) return;
                             if (document.getElementById('sr-widget-host')) return;
 
                             const host = document.createElement('div');
@@ -148,135 +347,56 @@ namespace PlaywrightSmartRecorder.Core
                                     .sr-tooltip { position: fixed; pointer-events: none; background: #1e1e1e; color: #4ec9b0; border: 1px solid #007acc; padding: 4px 8px; border-radius: 4px; font-family: Consolas, monospace; font-size: 11px; z-index: 2147483647; display: none; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
                                 </style>
                                 <div class="widget-bar">
-                                    <button class="btn" id="assertBtn" title="Hedef elemanın ekrandaki varlığını doğrular">🎯 Doğrula</button>
+                                    <button class="btn" id="assertBtn">🎯 Doğrula</button>
                                     <button class="btn" id="pauseBtn">⏸️ Duraklat</button>
                                     <button class="btn btn-stop" id="stopBtn">⏹️ Bitir</button>
                                 </div>
                                 <div id="tooltip" class="sr-tooltip"></div>
                             `;
-                            document.documentElement.appendChild(host);
+                            
+                            document.body.appendChild(host);
 
-                            const assertBtn = shadow.getElementById('assertBtn');
-                            const pauseBtn = shadow.getElementById('pauseBtn');
-                            const tooltip = shadow.getElementById('tooltip');
-
-                            assertBtn.addEventListener('click', (e) => { 
-                                e.stopPropagation(); 
-                                isAssertMode = !isAssertMode; 
-                                assertBtn.style.background = isAssertMode ? '#8b5cf6' : 'rgba(255,255,255,0.1)'; 
-                                assertBtn.innerHTML = isAssertMode ? '🎯 Seçiliyor...' : '🎯 Doğrula'; 
+                            shadow.getElementById('assertBtn').addEventListener('click', (e) => { 
+                                e.stopPropagation(); isAssertMode = !isAssertMode; 
+                                e.target.style.background = isAssertMode ? '#8b5cf6' : 'rgba(255,255,255,0.1)'; 
+                                e.target.innerHTML = isAssertMode ? '🎯 Seçiliyor...' : '🎯 Doğrula'; 
                             });
                             
-                            pauseBtn.addEventListener('click', (e) => { 
-                                e.stopPropagation(); 
-                                isPaused = !isPaused; 
-                                pauseBtn.innerHTML = isPaused ? '▶️ Devam Et' : '⏸️ Duraklat'; 
-                                pauseBtn.style.background = isPaused ? '#f59e0b' : 'rgba(255,255,255,0.1)'; 
+                            shadow.getElementById('pauseBtn').addEventListener('click', (e) => { 
+                                e.stopPropagation(); isPaused = !isPaused; 
+                                e.target.innerHTML = isPaused ? '▶️ Devam Et' : '⏸️ Duraklat'; 
+                                e.target.style.background = isPaused ? '#f59e0b' : 'rgba(255,255,255,0.1)'; 
                             });
                             
                             shadow.getElementById('stopBtn').addEventListener('click', (e) => { 
                                 e.stopPropagation(); 
-                                
-                                // Aktif bir input varsa, ondan zorla çıkış (blur) yap ki son yazılan veri 'change' eventi ile kayda geçsin!
-                                if (document.activeElement && typeof document.activeElement.blur === 'function') { 
-                                    document.activeElement.blur(); 
-                                }
-                                
-                                // C# tarafına verinin gitmesi için 300ms süre tanı, ardından kaydı bitir
-                                setTimeout(() => {
-                                    window.smartRecorderEmit(JSON.stringify({ actionType: 'StopControl' })); 
-                                }, 300);
+                                if (document.activeElement && typeof document.activeElement.blur === 'function') document.activeElement.blur();
+                                setTimeout(() => { window.smartRecorderEmit(JSON.stringify({ actionType: 'StopControl' })); }, 300);
                             });
 
-                            document.addEventListener('mousemove', (e) => {
-                                if (isPaused || !e.target) { tooltip.style.display = 'none'; return; }
-                                if (e.target.id === 'sr-widget-host' || host.contains(e.target)) { tooltip.style.display = 'none'; return; }
-                                
+                            window.addEventListener('mousemove', (e) => {
+                                const tooltip = shadow.getElementById('tooltip');
+                                if (isPaused || !e.target || e.target.id === 'sr-widget-host' || host.contains(e.target)) { 
+                                    tooltip.style.display = 'none'; return; 
+                                }
                                 const info = getElementInfo(e.target);
                                 let selector = info.tag;
                                 if (info.elementId) selector = '#' + info.elementId;
                                 else if (info.placeholder) selector = 'placeholder=' + info.placeholder;
                                 else if (info.textContent) selector = 'text=' + info.textContent;
-                                
                                 tooltip.textContent = selector;
                                 tooltip.style.left = (e.clientX + 12) + 'px';
                                 tooltip.style.top = (e.clientY + 12) + 'px';
                                 tooltip.style.display = 'block';
-                            }, true);
-                        });
-
-                        document.addEventListener('change', (e) => {
-                            if (isPaused) return;
-                            const target = e.target;
-                            const info = getElementInfo(target);
-                            
-                            if (target.tagName === 'SELECT') {
-                                window.smartRecorderEmit(JSON.stringify({ actionType: 'Select', ...info, selectedValue: target.value }));
-                            } else if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-                                if (target.type === 'checkbox' || target.type === 'radio') return;
-                                window.smartRecorderEmit(JSON.stringify({ actionType: 'Input', ...info, value: target.value }));
-                            }
-                        }, true);
-                        
-                        // KLAVYE (ENTER / ESCAPE) DİNLEYİCİSİ
-                        document.addEventListener('keydown', (e) => {
-                            if (isPaused) return;
-                            
-                            if (e.key === 'Enter' || e.key === 'Escape') {
-                                const target = e.target;
-                                const info = getElementInfo(target);
-                                
-                                // Kullanıcı Input içindeyken Enter'a basarsa, önce yazdığı değeri kaydet!
-                                if (e.key === 'Enter' && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
-                                    window.smartRecorderEmit(JSON.stringify({ 
-                                        actionType: 'Input', 
-                                        ...info, 
-                                        value: target.value 
-                                    }));
-                                }
-                                
-                                // Sonra tuş basımını kaydet
-                                window.smartRecorderEmit(JSON.stringify({ 
-                                    actionType: 'Keyboard', 
-                                    key: e.key, 
-                                    ...info 
-                                }));
-                            }
-                        }, true);
-
-                        document.addEventListener('click', (e) => {
-                            if (isPaused || e.target.closest('#sr-widget-host')) return;
-                            const info = getElementInfo(e.target);
-
-                            if (isAssertMode) {
-                                e.preventDefault(); e.stopPropagation();
-                                window.smartRecorderEmit(JSON.stringify({ actionType: 'Assert', ...info }));
-                                isAssertMode = false;
-                                document.getElementById('sr-widget-host').shadowRoot.getElementById('assertBtn').style.background = 'rgba(255,255,255,0.1)';
-                                document.getElementById('sr-widget-host').shadowRoot.getElementById('assertBtn').innerHTML = '🎯 Doğrula';
-                                return;
-                            }
-                            window.smartRecorderEmit(JSON.stringify({ actionType: 'Click', ...info }));
-                        }, true);
-
-                        document.addEventListener('mouseenter', (e) => {
-                            if (isPaused || e.target.closest('#sr-widget-host')) return;
-                            const target = e.target;
-                            const isMenu = target.tagName === 'A' || target.tagName === 'BUTTON' || target.classList.contains('dropdown');
-                            if (isMenu) {
-                                const info = getElementInfo(target);
-                                window.smartRecorderEmit(JSON.stringify({ actionType: 'Hover', ...info }));
-                            }
-                        }, true);
+                            }, { capture: true, passive: true });
+                        }, 500); 
                     }
                 """);
 
                 _isFirstPage = true; // Her kayıtta sıfırla
 
-                // 4. YENİ SEKMELERİ (POP-UP / YENİ TAB) YAKALAMA
                 _context.Page += (_, newPage) =>
                 {
-                    // Eğer bu açılan ilk ana sayfaysa, onu "Yeni Sekme" olarak sayma ve atla!
                     if (_isFirstPage) 
                     { 
                         _isFirstPage = false; 
@@ -285,10 +405,25 @@ namespace PlaywrightSmartRecorder.Core
 
                     _pageCounter++;
                     string alias = $"page{_pageCounter}";
-                    AttachEventListenersToPage(newPage, alias);
+                    _pageAliases[newPage] = alias; 
+                    
+                    // --- LOG EKLENDİ ---
+                    Console.WriteLine($"[C# SENSEWRIGHT] YENİ SEKME YAKALANDI! Alias: {alias}, URL: {newPage.Url}");
+                    System.Diagnostics.Debug.WriteLine($"[C# SENSEWRIGHT] YENİ SEKME YAKALANDI! Alias: {alias}");
+
+                    OnActionRecorded?.Invoke(new TabOpenedAction 
+                    { 
+                        ActionType = "Tab Opened",
+                        PageAlias = alias,
+                        Timestamp = DateTime.Now
+                    }); 
+                    
+                    AttachEventListenersToPage(newPage, alias); 
                 };
                 
                 _page = await _context.NewPageAsync();
+                _pageAliases.Clear();
+                _pageAliases[_page] = "page"; // Ana sayfamız her zaman 'page' dir
                 AttachEventListenersToPage(_page, "page");
 
                 await _page.GotoAsync(targetUrl);
@@ -325,6 +460,18 @@ namespace PlaywrightSmartRecorder.Core
 
         public async Task StopRecordingAsync()
         {
+            if (_context != null)
+            {
+                foreach (var p in _context.Pages)
+                {
+                    try 
+                    { 
+                        await p.EvaluateAsync("if (document.activeElement && typeof document.activeElement.blur === 'function') document.activeElement.blur();"); 
+                        await Task.Delay(200); // Verinin C#'a ulaşması için çok kısa bir süre
+                    } 
+                    catch { /* Sayfa kapalıysa veya JS hatası verirse yoksay */ }
+                }
+            }
             if (_page != null) { await _page.CloseAsync(); _page = null; }
             if (_context != null) { await _context.CloseAsync(); _context = null; }
             if (_browser != null) { await _browser.CloseAsync(); _browser = null; }

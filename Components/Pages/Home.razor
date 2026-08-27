@@ -136,9 +136,9 @@
                 </div>
             </div>
             
-            <!-- Kod Editörü Alanı -->
-            <div class="card-body p-0 d-flex flex-column h-100 position-relative" style="background-color: #1e1e1e;">
-                <pre class="m-0 p-4 h-100" style="overflow-auto; font-family: 'Fira Code', Consolas, monospace; font-size: 0.95rem; line-height: 1.5;"><code class="language-typescript"></code></pre>
+            <!-- ÇÖZÜM BURADA: Editör Alanındaki Taşma ve Flexbox Problemi Giderildi -->
+            <div class="card-body p-0 d-flex flex-column flex-grow-1 position-relative" style="background-color: #1e1e1e; min-height: 0;">
+                <pre class="m-0 p-4" style="flex-grow: 1; overflow-auto; min-height: 0; padding-bottom: 80px !important; font-family: 'Fira Code', Consolas, monospace; font-size: 0.95rem; line-height: 1.5;"><code class="language-typescript"></code></pre>
             </div>
 
         </div>
@@ -210,7 +210,7 @@
     {
         try 
         {
-            // ÇÖZÜM BURADA: Arayüz için ters tuttuğumuz listeyi, kod üreticiye kronolojik (düz) sırayla veriyoruz
+            // Arayüz için ters tuttuğumuz listeyi, kod üreticiye kronolojik (düz) sırayla veriyoruz
             var chronologicalActions = recordedActions.AsEnumerable().Reverse().ToList();
             generatedCode = TsGenerator.Generate(chronologicalActions);
             
@@ -285,55 +285,37 @@
     private async Task SaveCode()
     {
         if (string.IsNullOrWhiteSpace(generatedCode)) return;
-
+        
         try
         {
-            // Benzersiz dosya adı için anlık tarih-saat damgası (Örn: smart_test_16292425082026.spec.ts)
-            string timeStamp = DateTime.Now.ToString("HHmmssddMMyyyy");
-            string fileName = $"smart_test_{timeStamp}.spec.ts";
-
-            #if WINDOWS
-            var savePicker = new Windows.Storage.Pickers.FileSavePicker();
-            // Varsayılan açılış konumunu 'Belgelerim' (Documents) yapıyoruz
-            savePicker.SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary;
+            // Kullanıcıdan dosya adı iste
+            string userInput = await JSRuntime.InvokeAsync<string>("prompt", "Test dosyasının adını girin:", "yeni_test");
+            if (string.IsNullOrWhiteSpace(userInput)) return; // İptal edildiyse işlemi durdur
             
-            savePicker.FileTypeChoices.Add("TypeScript Test Dosyası (*.ts)", new List<string>() { ".ts" });
-            savePicker.FileTypeChoices.Add("Tüm Dosyalar (*.*)", new List<string>() { "." });
-            savePicker.SuggestedFileName = fileName;
-
-            var window = Microsoft.Maui.Controls.Application.Current?.Windows.FirstOrDefault()?.Handler?.PlatformView as Microsoft.UI.Xaml.Window;
-            if (window != null)
-            {
-                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
-                WinRT.Interop.InitializeWithWindow.Initialize(savePicker, hwnd);
-            }
-
-            var file = await savePicker.PickSaveFileAsync();
-            if (file != null)
-            {
-                await Windows.Storage.FileIO.WriteTextAsync(file, generatedCode);
-                
-                isSaved = true;
-                StateHasChanged();
-                await Task.Delay(2000);
-                isSaved = false;
-                StateHasChanged();
-            }
-            #else
-                        // Windows dışı platformlar için doğrudan Documents klasörüne kayıt
-                        string defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), fileName);
-                        await File.WriteAllTextAsync(defaultPath, generatedCode);
-                        
-                        isSaved = true;
-                        StateHasChanged();
-                        await Task.Delay(2000);
-                        isSaved = false;
-                        StateHasChanged();
-            #endif
+            // Kullanıcı .spec.ts yazmışsa temizle, biz standart ekleyelim
+            userInput = userInput.Replace(".spec.ts", "");
+            string fileName = $"{userInput}.spec.ts";
+            
+            string jsCode = @"
+                window.downloadCode = function(filename, content) {
+                    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                };
+            ";
+            
+            await JSRuntime.InvokeVoidAsync("eval", jsCode);
+            await JSRuntime.InvokeVoidAsync("window.downloadCode", fileName, generatedCode);
         }
         catch (Exception ex)
         {
-            LogService.LogError("Dosya kaydedilirken hata oluştu.", ex);
+            Console.WriteLine($"Kayıt hatası: {ex.Message}");
         }
     }
 

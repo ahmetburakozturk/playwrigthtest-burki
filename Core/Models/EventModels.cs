@@ -9,6 +9,19 @@ namespace PlaywrightSmartRecorder.Core.Models
         public string PageAlias { get; init; } = "page"; // Hangi sekmede işlem yapıldı? (page, page1, page2...)
         public string CssSelector { get; init; } = "";
         public bool IsDynamicListElement { get; init; } = false;
+        public string CustomTestId { get; init; } = "";
+    }
+
+    public record TabOpenedAction : UserAction;
+
+    public record ExtractAction : UserAction
+    {
+        public string ExtractedValue { get; init; } = "";
+        public string Placeholder { get; init; } = "";
+        public string AriaLabel { get; init; } = "";
+        public string Name { get; init; } = "";
+        public string Tag { get; init; } = "";
+        public string ElementId { get; init; } = "";
     }
 
     public record ClickAction : UserAction
