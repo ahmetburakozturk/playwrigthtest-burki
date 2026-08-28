@@ -118,9 +118,10 @@ namespace PlaywrightSmartRecorder.Core
                         let isPaused = false;
                         let isAssertMode = false;
                         
-                        // YENİ: Çift tıklama kalkanı için hedefleri hafızada tutuyoruz
                         let lastActionTime = 0;
                         let lastActionTarget = null;
+                        let hoverTimer = null;
+                        let lastHoverTarget = null;
 
                         const getCssPath = (el) => {
                             if (!(el instanceof Element)) return '';
@@ -143,49 +144,6 @@ namespace PlaywrightSmartRecorder.Core
                             return path.join(' > ');
                         };
 
-                        // YENİ VE GELİŞMİŞ: YANLIŞ TIKLAMA (MISCLICK) SENSÖRÜ
-                        const isInteractiveElement = (el) => {
-                            const interactiveTags = ['a', 'button', 'input', 'select', 'textarea', 'label', 'li', 'td', 'th', 'summary', 'option', 'tr'];
-                            const interactiveRoles = ['button', 'link', 'menuitem', 'option', 'tab', 'checkbox', 'radio', 'switch', 'treeitem', 'combobox'];
-
-                            let current = el;
-                            let depth = 0;
-                            
-                            // Menzili 3'ten 5'e çıkardık ki derin iç içe geçmiş kurumsal menüleri kaçırmasın
-                            while (current && current !== document.body && depth < 5) {
-                                // 1. Standart Etiket ve Rol Kontrolü
-                                const tag = current.tagName ? current.tagName.toLowerCase() : '';
-                                if (interactiveTags.includes(tag)) return true;
-
-                                const role = current.getAttribute ? current.getAttribute('role') : null;
-                                if (role && interactiveRoles.includes(role)) return true;
-
-                                // 2. Özel Kurumsal Özellik (Attribute) Kontrolü
-                                if (current.hasAttribute) {
-                                    if (current.hasAttribute('href') || current.hasAttribute('onclick') || 
-                                        current.hasAttribute('data-toggle') || current.hasAttribute('data-bs-toggle')) {
-                                        return true;
-                                    }
-                                }
-
-                                // 3. Özel SPA Sınıf (Class) Kontrolü
-                                const className = current.className && typeof current.className === 'string' ? current.className.toLowerCase() : '';
-                                if (className.includes('btn') || className.includes('menu') || className.includes('nav-link') || 
-                                    className.includes('dropdown-item') || className.includes('clickable')) {
-                                    return true;
-                                }
-
-                                // 4. Görsel Kontrol (Fare imleci)
-                                const style = window.getComputedStyle(current);
-                                if (style && style.cursor === 'pointer') return true;
-
-                                // Bir üst kapsayıcıya geç
-                                current = current.parentElement;
-                                depth++;
-                            }
-                            return false;
-                        };
-
                         const getElementInfo = (el) => {
                             let elId = el.id || '';
                             if (elId.includes('-result-') || (elId.startsWith('select2-') && elId.includes('-result'))) {
@@ -195,7 +153,6 @@ namespace PlaywrightSmartRecorder.Core
                             return {
                                 tag: el.tagName ? el.tagName.toLowerCase() : '',
                                 elementId: elId,
-                                // YENİ: \n (alt satır) ve fazladan boşlukları temizleyerek TS kodunun kırılmasını önler
                                 textContent: (el.innerText || '').replace(/\s+/g, ' ').substring(0, 50).trim(),
                                 placeholder: el.placeholder || '',
                                 ariaLabel: el.getAttribute ? (el.getAttribute('aria-label') || '') : '',
@@ -206,14 +163,16 @@ namespace PlaywrightSmartRecorder.Core
                             };
                         };
 
-                        // AKILLI (AKRABA ELEMENT) TIKLAMA KALKANI
                         const handleInteraction = (e, target) => {
+                            if (typeof hoverTimer !== 'undefined' && hoverTimer !== null) {
+                                clearTimeout(hoverTimer);
+                            }
+
                             if (isPaused || !target || !e.isTrusted) return;
                             if (target.closest && target.closest('#sr-widget-host')) return;
                             
                             const now = Date.now();
                             
-                            // Akraba Element ve Gizli Checkbox Kalkanı
                             if (lastActionTarget && (lastActionTarget === target || lastActionTarget.contains(target) || target.contains(lastActionTarget))) {
                                 if (now - lastActionTime < 800) return; 
                             } else {
@@ -239,22 +198,16 @@ namespace PlaywrightSmartRecorder.Core
                             window.smartRecorderEmit(JSON.stringify({ actionType: 'Click', ...info }));
                         };
 
-                        // YENİ: KOPYALAMA (CTRL+C / SAĞ TIK) SENSÖRÜ
-                        // Kullanıcı bir metni seçip kopyaladığında, bunu dinamik bir değişken olarak kaydeder.
                         window.addEventListener('copy', (e) => {
                             const selection = window.getSelection();
                             const text = selection.toString().trim();
                             
                             if (!text || selection.rangeCount === 0) return;
                             
-                            // Metnin bulunduğu asıl HTML elementini bul
                             let node = selection.getRangeAt(0).commonAncestorContainer;
-                            let el = node.nodeType === 3 ? node.parentNode : node; // Text node ise kapsayıcıya çık
+                            let el = node.nodeType === 3 ? node.parentNode : node;
                             
                             const info = getElementInfo(el);
-                            
-                            console.log("[JS SENSEWRIGHT] Metin Kopyalandı. Değişkene atanıyor:", text);
-                            
                             window.smartRecorderEmit(JSON.stringify({ 
                                 actionType: 'Extract', 
                                 ...info,
@@ -262,27 +215,30 @@ namespace PlaywrightSmartRecorder.Core
                             }));
                         }, { capture: true });
 
-                        // YENİ: HOVER (ÜZERİNDE BEKLEME / TOOLTIP AÇMA) SENSÖRÜ
-                        let hoverTimer = null;
                         window.addEventListener('mouseover', (e) => {
                             if (isPaused || !e.target) return;
                             if (e.target.closest && e.target.closest('#sr-widget-host')) return;
 
                             clearTimeout(hoverTimer);
                             
-                            // Kullanıcı bir elementin üzerinde 800ms boyunca beklerse, bunu bir "Tooltip açma (Hover)" eylemi olarak kaydet
                             hoverTimer = setTimeout(() => {
+                                if (lastHoverTarget === e.target) return; 
+                                lastHoverTarget = e.target;
+                                
                                 const info = getElementInfo(e.target);
-                                // Boş alanları kaydetme
-                                if (info.textContent && info.textContent.trim().length > 0) {
-                                    console.log("[JS SENSEWRIGHT] Hover algılandı:", info.textContent);
+                                const tag = info.tag;
+                                
+                                const isMeaningful = (info.elementId && info.elementId.length > 0) || 
+                                                     ['a', 'button', 'th', 'td', 'tr', 'li', 'i', 'label'].includes(tag);
+                                
+                                if (isMeaningful && info.textContent) {
                                     window.smartRecorderEmit(JSON.stringify({ actionType: 'Hover', ...info }));
                                 }
                             }, 800); 
                         }, { capture: true, passive: true });
 
-                        window.addEventListener('mouseout', () => {
-                            clearTimeout(hoverTimer); // Fare elementten çıkarsa sayacı sıfırla
+                        window.addEventListener('mouseout', (e) => {
+                            clearTimeout(hoverTimer);
                         }, { capture: true, passive: true });
 
                         window.addEventListener('change', (e) => {
@@ -309,26 +265,45 @@ namespace PlaywrightSmartRecorder.Core
                             }
                         }, { capture: true, passive: true });
 
-                        // YENİ: AÇILIR MENÜ (LI/OPTION) İÇİN ÖZEL MOUSEDOWN YAKALAYICI
-                        // Select2 gibi kütüphaneler click event'ini yuttuğu için seçimi mousedown ile garanti altına alıyoruz.
+                        // YENİ: AKILLI HEDEF YÜKSELTİCİ (Smart Hoister)
+                        const getLogicalTarget = (el) => {
+                            if (!el) return null;
+                            
+                            // 1. ZIRH: Tıklanan şey input (arama kutusu), buton veya link ise ASLA müdahale etme!
+                            const tag = el.tagName ? el.tagName.toLowerCase() : '';
+                            if (['input', 'button', 'a', 'select', 'textarea'].includes(tag)) {
+                                return el;
+                            }
+
+                            // 2. ZIRH: Tıklanan şey sıradan bir metin ve tablo verisi (td, tr) içindeyse, onu korumak için hücreye yükselt!
+                            // Not: 'th' (başlık) ve 'li' (menü) BİLEREK hariç tutuldu ki arama kutusu ve sol menü bozulmasın.
+                            const cell = el.closest('td, tr'); 
+                            if (cell) return cell;
+                            
+                            return el;
+                        };
+
                         window.addEventListener('mousedown', (e) => {
                             if (!e.target) return;
-                            const isDropdownOption = e.target.tagName === 'LI' || 
-                                                     (e.target.closest && e.target.closest('li')) || 
-                                                     e.target.getAttribute('role') === 'option' || 
-                                                     e.target.getAttribute('role') === 'treeitem' || 
-                                                     (e.target.className && typeof e.target.className === 'string' && e.target.className.includes('option'));
                             
-                            if (isDropdownOption) {
-                                handleInteraction(e, e.target);
+                            const target = getLogicalTarget(e.target);
+                            if (!target) return;
+                            
+                            const tag = target.tagName ? target.tagName.toUpperCase() : '';
+                            const isDropdownOrGrid = tag === 'LI' || tag === 'TD' || tag === 'TR' || tag === 'TH' ||
+                                                     target.getAttribute('role') === 'option' || 
+                                                     target.getAttribute('role') === 'treeitem';
+                            
+                            if (isDropdownOrGrid) {
+                                handleInteraction(e, target);
                             }
                         }, { capture: true, passive: true });
 
                         window.addEventListener('click', (e) => {
-                            handleInteraction(e, e.target);
+                            const target = getLogicalTarget(e.target);
+                            handleInteraction(e, target);
                         }, { capture: true });
 
-                        // WIDGET ÇİZİMİ
                         setInterval(() => {
                             if (!document.body) return;
                             if (document.getElementById('sr-widget-host')) return;
