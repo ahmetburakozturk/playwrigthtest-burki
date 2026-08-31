@@ -93,23 +93,18 @@ namespace PlaywrightSmartRecorder.Core
                 // PORTABLE CHROMIUM
                 // ============================================================
 
-                string browserPath =
-                    System.IO.Path.Combine(
-                        AppContext.BaseDirectory,
-                        "browsers");
+                // AppContext.BaseDirectory yerine, Single File (.exe) dostu olan gerçek dizin bulucu:
+                string exeFolder = System.IO.Path.GetDirectoryName(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
+                
+                string browserPath = System.IO.Path.Combine(exeFolder, "browsers");
 
-                Environment.SetEnvironmentVariable(
-                    "PLAYWRIGHT_BROWSERS_PATH",
-                    browserPath);
+                Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", browserPath);
 
-                int exitCode =
-                    Microsoft.Playwright.Program.Main(
-                        new[] { "install", "chromium" });
+                int exitCode = Microsoft.Playwright.Program.Main(new[] { "install", "chromium" });
 
                 if (exitCode != 0)
                 {
-                    throw new Exception(
-                        "Playwright Chromium tarayıcısı kurulamadı veya bulunamadı.");
+                    throw new Exception("Playwright Chromium tarayıcısı kurulamadı veya bulunamadı.");
                 }
 
                 _playwright =
