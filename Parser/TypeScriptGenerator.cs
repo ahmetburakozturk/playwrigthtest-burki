@@ -448,31 +448,27 @@ namespace PlaywrightSmartRecorder.Parser
                 // HOVER
                 // ============================================================
 
-                if (
-                    action is HoverAction hover
-                )
+                if (action is HoverAction hover)
                 {
-                    string locator =
-                        BuildModernLocator(
-                            hover.Placeholder,
-                            hover.AriaLabel,
-                            hover.TextContent,
-                            hover.ElementId,
-                            hover.Tag,
-                            hover.Name,
-                            hover.CssSelector,
-                            hover.IsDynamicListElement,
-                            hover.CustomTestId,
-                            "Hover",
-                            dynamicVariables);
+                    string locator = BuildModernLocator(
+                        hover.Placeholder,
+                        hover.AriaLabel,
+                        hover.TextContent,
+                        hover.ElementId,
+                        hover.Tag,
+                        hover.Name,
+                        hover.CssSelector,
+                        hover.IsDynamicListElement,
+                        hover.CustomTestId,
+                        "Hover",
+                        dynamicVariables); // Parametremizi de unutmuyoruz
 
                     sb.AppendLine();
-
-                    sb.AppendLine(
-                        "// Tooltip/Pop-up açmak için element üzerinde hover");
-
-                    sb.AppendLine(
-                        $"await {hover.PageAlias}.{locator}.hover();");
+                    sb.AppendLine("// Tooltip/Pop-up açmak için element üzerinde hover");
+                    sb.AppendLine("// Not: Yanlışlıkla oluşan veya ID'si dinamik değişen hover'ların testi patlatmaması için 2 saniyelik esnek (soft) bekleme konuldu.");
+                    
+                    // DEĞİŞEN KISIM: .hover() metoduna timeout ve catch() ekliyoruz.
+                    sb.AppendLine($"await {hover.PageAlias}.{locator}.hover({{ timeout: 2000 }}).catch(() => {{}});");
 
                     continue;
                 }
@@ -686,18 +682,18 @@ namespace PlaywrightSmartRecorder.Parser
 
                         sb.AppendLine();
                         sb.AppendLine($"// Tıklamanın tetiklediği spesifik API isteğini ({triggeredNetwork.Method} {apiPath}) yakalamak için promise oluşturuluyor.");
-                        sb.AppendLine($"const {promise} = {p}.waitForResponse(resp => resp.url().includes('{Escape(apiPath)}') && resp.request().method() === '{Escape(triggeredNetwork.Method)}', {{ timeout: 15000 }}).catch(() => {{}});");
-                        
+                        sb.AppendLine($"const {promise} = {p}.waitForResponse(resp => resp.url().includes('{Escape(apiPath)}') && resp.request().method() === '{Escape(triggeredNetwork.Method)}', {{ timeout: 25000 }}).catch(() => {{}});");                        
                         sb.AppendLine($"await {p}.{clickLocator}.click();");
                         
                         sb.AppendLine($"await {promise};");
 
-                        // YENİ EKLENEN KISIM: Artçı İstekleri (GET) ve UI Kilitlerini (Spinner) Bekleme
+                        // 1. Ağın sakinleşme süresini (SPA ekran yenilenmesi) 10000'den 25000'e çıkarıyoruz.
                         sb.AppendLine($"// İşlem sonrası tetiklenen ardışık veri güncellemelerinin (GET vb.) bitmesini bekliyoruz.");
-                        sb.AppendLine($"await {p}.waitForLoadState('networkidle', {{ timeout: 10000 }}).catch(() => {{}});");
+                        sb.AppendLine($"await {p}.waitForLoadState('networkidle', {{ timeout: 25000 }}).catch(() => {{}});");
 
+                        // 2. Çok ağır ekranlarda React/Vue DOM çizimi için nefes payını 500'den 1500'e (1.5 saniye) çıkarıyoruz.
                         sb.AppendLine($"// Ön yüzün (React/Vue vb.) DOM'u tam çizmesi için kısa bir esneklik payı");
-                        sb.AppendLine($"await {p}.waitForTimeout(500);");
+                        sb.AppendLine($"await {p}.waitForTimeout(1500);");
                     }
                     else
                     {
@@ -932,30 +928,30 @@ namespace PlaywrightSmartRecorder.Parser
         // ====================================================================
         // EVENT RACE CONDITION FIX (REORDER)
         // ====================================================================
-
         private List<UserAction> ReorderEventRaceConditions(
             List<UserAction> source)
         {
             var result = new List<UserAction>(source);
-            bool swapped = true;
             
-            while (swapped)
+            for (int i = 1; i < result.Count; i++)
             {
-                swapped = false;
-                for (int i = 1; i < result.Count; i++)
+                if (result[i] is InputAction input)
                 {
-                    if (result[i] is InputAction input)
+                    var prev = result[i - 1];
+                    
+                    if ((prev is ClickAction prevClick && prevClick.CssSelector != input.CssSelector) ||
+                        (prev is HoverAction prevHover && prevHover.CssSelector != input.CssSelector))
                     {
-                        var prev = result[i - 1];
+                        // EKLENEN KISIM: İki işlem arasındaki zaman farkını milisaniye cinsinden ölçüyoruz.
+                        long timeDelta = Math.Abs(input.ClientTimestamp - prev.ClientTimestamp);
                         
-                        // Eğer bir önceki işlem farklı bir elemente (örn: dropdown butonu) ait bir Tıklama veya Hover ise
-                        if ((prev is ClickAction prevClick && prevClick.CssSelector != input.CssSelector) ||
-                            (prev is HoverAction prevHover && prevHover.CssSelector != input.CssSelector))
+                        // Sadece iki işlem 1 saniyeden (1000ms) kısa sürede yapıldıysa yer değiştir (Gerçek blur/click çakışması).
+                        // Aksi takdirde, kullanıcı menüyü/alanı açmak için tıklamış ve sonra veri girmiştir. Sırayı asla bozma!
+                        if (timeDelta < 1000)
                         {
-                            // Input (fill) işlemini mantıksal olarak Click'ten öncesine (yukarı) kaydırıyoruz.
                             result[i - 1] = input;
                             result[i] = prev;
-                            swapped = true;
+                            i++; 
                         }
                     }
                 }
@@ -988,25 +984,37 @@ namespace PlaywrightSmartRecorder.Parser
 
                 if (current is ClickAction click)
                 {
-                    // Listedeki EN SON aksiyonu alıyoruz.
-                    // Eğer araya NetworkAction veya NavigationAction girdiyse bu kural TETİKLENMEZ.
                     if (result.LastOrDefault() is ClickAction previousClick)
                     {
-                        // 1. ARAYA HİÇBİR İŞLEM GİRMEDEN AYNI METNE TIKLAMA (Boşa tıklama / Iskalama)
-                        if (!string.IsNullOrWhiteSpace(click.TextContent) && 
-                            string.Equals(click.TextContent, previousClick.TextContent, StringComparison.OrdinalIgnoreCase))
+                        // --- YENİ EKLENEN: ZAMAN KONTROLÜ ---
+                        long timeDelta = Math.Abs(click.ClientTimestamp - previousClick.ClientTimestamp);
+
+                        // Sadece 500 milisaniyeden kısa süren art arda tıklamalarda eleme (çöpe atma) yapıyoruz.
+                        // Eğer aradan 500ms'den uzun zaman geçtiyse (örn: bir pop-up'ı kapatıp diğerindekine tıklamak gibi),
+                        // bunlar bilinçli ve farklı tıklamalardır; eleme yapma!
+                        if (timeDelta < 500)
                         {
-                            // Araya istek girmediği için ilk tıklama işlevsizdir, sil.
-                            // Yenisi (doğru olan) birazdan döngü sonunda listeye eklenecek.
-                            result.RemoveAt(result.Count - 1);
-                        }
-                        // 2. TAMAMEN AYNI CSS SELECTOR'A ÇİFT TIKLAMA
-                        else if (click.CssSelector == previousClick.CssSelector)
-                        {
-                            continue;
+                            // 1. ARAYA HİÇBİR İŞLEM GİRMEDEN AYNI METNE TIKLAMA (Boşa tıklama / Iskalama)
+                            if (!string.IsNullOrWhiteSpace(click.TextContent) && 
+                                string.Equals(click.TextContent, previousClick.TextContent, StringComparison.OrdinalIgnoreCase))
+                            {
+                                // YENİ EKLENEN: Dropdown Açma Koruması
+                                bool isDropdownSequence = click.Tag == "li" || previousClick.Tag == "li";
+
+                                if (!isDropdownSequence)
+                                {
+                                    // Araya istek girmediği ve dropdown sekansı olmadığı için ilk tıklama işlevsizdir, sil.
+                                    result.RemoveAt(result.Count - 1);
+                                }
+                            }
+                            // 2. TAMAMEN AYNI CSS SELECTOR'A ÇİFT TIKLAMA
+                            else if (click.CssSelector == previousClick.CssSelector)
+                            {
+                                continue;
+                            }
                         }
                     }
-
+                    
                     // Popover extraction click'i... (Aşağısı aynı kalacak)
                     if (
                         i < source.Count - 1 &&
@@ -1158,74 +1166,62 @@ namespace PlaywrightSmartRecorder.Parser
         {
             string mode = string.IsNullOrWhiteSpace(ext.ExtractionMode) ? "Text" : ext.ExtractionMode;
 
+            // 1. VERİYİ SAYFADAN ÇEKME AŞAMASI
             if (mode.Equals("Text", StringComparison.OrdinalIgnoreCase))
             {
                 sb.AppendLine();
                 sb.AppendLine("// Normal DOM text extraction");
-                
-                // const yerine let kullanıyoruz ki temizlik yapabilelim
                 sb.AppendLine($"let {varName} = (await {ext.PageAlias}.{locator}.innerText()).trim();");
-
-                // YENİ MANTIK: TextContent olmadığı için sadece ExtractedValue'ya bakıyoruz.
-                // Eğer kopyalanan veri sadece rakamlardan oluşuyorsa, çalışma anında elementteki diğer tüm karakterleri temizle.
-                if (!string.IsNullOrWhiteSpace(ext.ExtractedValue) && 
-                    ext.ExtractedValue.All(char.IsDigit))
-                {
-                    sb.AppendLine();
-                    sb.AppendLine($"// Kullanıcı test kaydında sadece rakam kopyalamıştı, metin içindeki harf ve sembolleri ( : vb.) temizliyoruz.");
-                    sb.AppendLine($"{varName} = {varName}.replace(/[^0-9]/g, '');");
-                }
-                else if (!string.IsNullOrWhiteSpace(ext.ExtractedValue))
-                {
-                    sb.AppendLine();
-                    sb.AppendLine($"// Elementin sonundaki muhtemel gereksiz karakterleri (örn: iki nokta) temizliyoruz.");
-                    sb.AppendLine($"{varName} = {varName}.replace(/[:]/g, '').trim();");
-                }
-
-                return;
             }
-
-            if (
-                mode.Equals(
-                    "Attribute",
-                    StringComparison.OrdinalIgnoreCase)
-            )
+            else if (mode.Equals("Attribute", StringComparison.OrdinalIgnoreCase))
             {
-                string attribute =
-                    string.IsNullOrWhiteSpace(
-                        ext.AttributeName)
-                        ? "value"
-                        : ext.AttributeName;
-
+                string attribute = string.IsNullOrWhiteSpace(ext.AttributeName) ? "value" : ext.AttributeName;
                 sb.AppendLine();
-
-                sb.AppendLine(
-                    $"// HTML attribute extraction: {attribute}");
-
-                sb.AppendLine(
-                    $"const {varName} = ((await {ext.PageAlias}.{locator}.getAttribute('{Escape(attribute)}')) ?? '').trim();");
-
+                sb.AppendLine($"// HTML attribute extraction: {attribute}");
+                // DİKKAT: Temizlik yapabilmek için const yerine let kullanıyoruz!
+                sb.AppendLine($"let {varName} = ((await {ext.PageAlias}.{locator}.getAttribute('{Escape(attribute)}')) ?? '').trim();");
                 sb.AppendLine();
-
-                sb.AppendLine(
-                    $"if (!{varName}) throw new Error('Attribute extraction başarısız: {Escape(attribute)}');");
-
-                return;
+                sb.AppendLine($"if (!{varName}) throw new Error('Attribute extraction başarısız: {Escape(attribute)}');");
             }
-
-            if (mode.StartsWith("Popover", StringComparison.OrdinalIgnoreCase))
+            else if (mode.StartsWith("Popover", StringComparison.OrdinalIgnoreCase))
             {
                 GeneratePopoverExtraction(sb, ext, locator, varName);
-                return;
+            }
+            else
+            {
+                sb.AppendLine();
+                sb.AppendLine($"// Bilinmeyen extraction mode '{Escape(mode)}'; Text fallback kullanılıyor");
+                sb.AppendLine($"let {varName} = (await {ext.PageAlias}.{locator}.innerText()).trim();");
             }
 
-            sb.AppendLine();
+            // 2. ORTAK TEMİZLİK AŞAMASI (TÜM MODLAR İÇİN GEÇERLİ!)
+            
+            if (!string.IsNullOrEmpty(ext.ExtractPrefix))
+            {
+                sb.AppendLine();
+                sb.AppendLine($"// Kopyalama sırasında seçilmeyen ÖN EK (Prefix) kısmı temizleniyor");
+                sb.AppendLine($"{varName} = {varName}.replace('{Escape(ext.ExtractPrefix)}', '').trim();");
+            }
+            
+            if (!string.IsNullOrEmpty(ext.ExtractSuffix))
+            {
+                sb.AppendLine();
+                sb.AppendLine($"// Kopyalama sırasında seçilmeyen SON EK (Suffix) kısmı temizleniyor");
+                sb.AppendLine($"{varName} = {varName}.replace('{Escape(ext.ExtractSuffix)}', '').trim();");
+            }
 
-            sb.AppendLine(
-                $"// Bilinmeyen extraction mode '{Escape(mode)}'; Text fallback kullanılıyor");
-
-            sb.AppendLine(
-                $"const {varName} = (await {ext.PageAlias}.{locator}.innerText()).trim();");
+            if (!string.IsNullOrWhiteSpace(ext.ExtractedValue) && ext.ExtractedValue.All(char.IsDigit))
+            {
+                sb.AppendLine();
+                sb.AppendLine($"// Kullanıcı test kaydında sadece rakam kopyalamıştı, metin içindeki harf ve sembolleri temizliyoruz.");
+                sb.AppendLine($"{varName} = {varName}.replace(/[^0-9]/g, '');");
+            }
+            else if (!string.IsNullOrWhiteSpace(ext.ExtractedValue))
+            {
+                sb.AppendLine();
+                sb.AppendLine($"// Elementin sonundaki muhtemel gereksiz karakterleri (örn: iki nokta) temizliyoruz.");
+                sb.AppendLine($"{varName} = {varName}.replace(/[:]/g, '').trim();");
+            }
         }
 
         // ====================================================================
@@ -1241,10 +1237,15 @@ namespace PlaywrightSmartRecorder.Parser
             string attributeName = string.IsNullOrWhiteSpace(ext.AttributeName) ? "data-content" : ext.AttributeName;
             string label = string.IsNullOrWhiteSpace(ext.ExtractionLabel) ? "" : ext.ExtractionLabel;
             bool isHorizontal = ext.ExtractionMode.Equals("PopoverHorizontal", StringComparison.OrdinalIgnoreCase);
+            int labelIndex = ext.ExtractionLabelIndex; 
 
             sb.AppendLine();
+            sb.AppendLine("// Popover/Tooltip içeriğinin DOM'a yüklenmesi ve animasyonların bitmesi için bekleme (Race Condition Koruması)");
+            sb.AppendLine($"await {ext.PageAlias}.waitForTimeout(1500);");
+            sb.AppendLine();
+            
             sb.AppendLine("// Bootstrap / HTML popover içindeki dinamik veri okunuyor");
-            sb.AppendLine($"const {varName} = await {ext.PageAlias}.{locator}.evaluate((el) => {{");
+            sb.AppendLine($"let {varName} = await {ext.PageAlias}.{locator}.evaluate((el) => {{");
             sb.AppendLine($"    const content = el.getAttribute('{Escape(attributeName)}') || '';");
             sb.AppendLine($"    if (!content) throw new Error('Popover attribute bulunamadı: {Escape(attributeName)}');");
             
@@ -1262,24 +1263,24 @@ namespace PlaywrightSmartRecorder.Parser
                     sb.AppendLine("    // Yatay (Horizontal) tablo araması");
                     sb.AppendLine("    const headers = Array.from(rows[0].querySelectorAll('th, td')).map(h => (h.textContent || '').replace(/\\s+/g, ' ').trim());");
                     sb.AppendLine($"    const colIndex = headers.indexOf('{Escape(label)}');");
-                    sb.AppendLine("    if (colIndex !== -1 && rows.length > 1) {");
-                    sb.AppendLine("        const cells = Array.from(rows[1].querySelectorAll('th, td'));");
+                    sb.AppendLine($"    if (colIndex !== -1 && rows.length > {labelIndex + 1}) {{");
+                    sb.AppendLine($"        const cells = Array.from(rows[{labelIndex + 1}].querySelectorAll('th, td'));");
                     sb.AppendLine("        return (cells[colIndex]?.textContent || '').replace(/\\s+/g, ' ').trim();");
                     sb.AppendLine("    }");
                     sb.AppendLine($"    throw new Error('Yatay popover içinde \"{Escape(label)}\" sütunu bulunamadı.');");
                 }
                 else
                 {
-                    sb.AppendLine("    // Dikey (Vertical) tablo araması");
-                    sb.AppendLine("    const row = rows.find((r) => {");
+                    sb.AppendLine("    // Dikey (Vertical) tablo araması (Aynı etiketten birden fazla varsa Index ile filtreliyoruz)");
+                    sb.AppendLine($"    const matchingRows = rows.filter((r) => {{");
                     sb.AppendLine("        const cells = Array.from(r.querySelectorAll('th, td'));");
                     sb.AppendLine("        if (cells.length < 2) return false;");
                     sb.AppendLine("        const rowLabel = (cells[0].textContent || '').replace(/\\s+/g, ' ').trim();");
                     sb.AppendLine($"        return rowLabel === '{Escape(label)}';");
                     sb.AppendLine("    });");
                     sb.AppendLine();
-                    sb.AppendLine($"    if (!row) throw new Error('Dikey popover içinde \"{Escape(label)}\" satırı bulunamadı.');");
-                    sb.AppendLine("    const cells = Array.from(row.querySelectorAll('th, td'));");
+                    sb.AppendLine($"    if (matchingRows.length <= {labelIndex}) throw new Error('Dikey popover içinde \"{Escape(label)}\" etiketli {labelIndex + 1}. satır bulunamadı.');");
+                    sb.AppendLine($"    const cells = Array.from(matchingRows[{labelIndex}].querySelectorAll('th, td'));");
                     sb.AppendLine("    return (cells[1]?.textContent || '').replace(/\\s+/g, ' ').trim();");
                 }
             }
@@ -1360,9 +1361,8 @@ namespace PlaywrightSmartRecorder.Parser
         }
 
         // ====================================================================
-        // LOCATOR
+        // LOCATOR BUILDER (AKILLI ELEMENT BULUCU)
         // ====================================================================
-
         private string BuildModernLocator(
             string placeholder,
             string ariaLabel,
@@ -1374,68 +1374,95 @@ namespace PlaywrightSmartRecorder.Parser
             bool isDynamicListElement,
             string customTestId,
             string actionType,
-            Dictionary<string, string> dynamicVariables = null) // EKLENDİ: Dinamik değişkenler parametresi
+            Dictionary<string, string> dynamicVariables = null)
         {
+            // --- YENİDEN EKLENEN: Dinamik Değişken Yerleştirme Zekası ---
+            string ProcessString(string input, out bool hasVar)
+            {
+                hasVar = false;
+                if (string.IsNullOrEmpty(input)) return "";
+                
+                string result = Escape(input);
+                if (dynamicVariables != null && dynamicVariables.Count > 0)
+                {
+                    // Kısmi eşleşme hatalarını önlemek için en uzun metinleri önce değiştiriyoruz
+                    foreach (var kvp in dynamicVariables.OrderByDescending(v => v.Key.Length))
+                    {
+                        if (result.Contains(Escape(kvp.Key)))
+                        {
+                            result = result.Replace(Escape(kvp.Key), $"${{{kvp.Value}}}");
+                            hasVar = true;
+                        }
+                    }
+                }
+                return result;
+            }
+
+            // 1. Özel Test ID Koruması
             if (!string.IsNullOrWhiteSpace(customTestId))
             {
                 return $"locator('[data-name=\"{EscapeDoubleQuoted(customTestId)}\"], [data-testid=\"{EscapeDoubleQuoted(customTestId)}\"]').first()";
             }
 
-            if (!string.IsNullOrWhiteSpace(id))
+            // 2. Dinamik GUID ID Koruması
+            bool isGuidId = !string.IsNullOrWhiteSpace(id) && id.Length == 36 && id.Split('-').Length == 5;
+
+            // 3. Z-Index ve Dinamik ID Uzantı Koruması
+            if (!string.IsNullOrWhiteSpace(id) && !isGuidId)
             {
-                return $"locator('#{Escape(id)}')";
+                return $"locator('[id*=\"{EscapeDoubleQuoted(id)}\"]:visible').last()";
             }
 
+            // 4. Placeholder (Değişken Destekli)
             if (!string.IsNullOrWhiteSpace(placeholder))
             {
-                return $"getByPlaceholder('{Escape(placeholder)}').first()";
+                string procPlaceholder = ProcessString(placeholder, out bool hasVar);
+                string quote = hasVar ? "`" : "'";
+                return $"getByPlaceholder({quote}{procPlaceholder}{quote}).first()";
             }
 
+            // 5. Aria Label (Değişken Destekli)
             if (!string.IsNullOrWhiteSpace(ariaLabel))
             {
-                return $"getByLabel('{Escape(ariaLabel)}').first()";
+                string procAria = ProcessString(ariaLabel, out bool hasVar);
+                string quote = hasVar ? "`" : "'";
+                return $"getByLabel({quote}{procAria}{quote}).first()";
             }
 
-            if (!string.IsNullOrWhiteSpace(name))
+            // 6. Jenerik Matematiksel Sembol Koruması (+, -, x vb.)
+            string trimmedText = text?.Trim() ?? "";
+            bool isGenericMathSymbol = trimmedText == "+" || trimmedText == "-" || trimmedText == "−" || trimmedText == "x" || trimmedText == "X";
+
+            if (isGenericMathSymbol && !string.IsNullOrWhiteSpace(cssSelector))
             {
-                return $"locator('{Escape(tag)}[name=\"{EscapeDoubleQuoted(name)}\"]').first()";
+                return $"locator('{EscapeDoubleQuoted(cssSelector)}').first()";
             }
 
+            // 7. Akıllı Metin (Text) Araması (Değişken Destekli)
             if (!string.IsNullOrWhiteSpace(text))
             {
-                bool isTableCell = tag == "td" || tag == "th";
+                string procText = ProcessString(text, out bool hasVar);
+                string quote = hasVar ? "`" : "'"; // Değişken varsa backtick (`), yoksa tek tırnak (')
                 
-                // YENİ MANTIK: Eğer metin içinde dinamik değişken değeri geçiyorsa, onu TypeScript değişken formatına çevir.
-                string textLiteral = $"'{Escape(text)}'";
-                if (dynamicVariables != null)
-                {
-                    foreach (var kvp in dynamicVariables)
-                    {
-                        if (!string.IsNullOrWhiteSpace(kvp.Key) && text.Contains(kvp.Key))
-                        {
-                            string replacedText = Escape(text).Replace(Escape(kvp.Key), $"${{{kvp.Value}}}");
-                            textLiteral = $"`{replacedText}`"; // TypeScript backtick string interpolasyonu
-                            break;
-                        }
-                    }
-                }
-
-                if ((actionType == "Hover" || actionType == "Extract") && (isTableCell || tag == "tr"))
-                {
-                    // CSS fallback.
-                }
-                else if (isTableCell)
-                {
-                    return $"getByRole('cell', {{ name: {textLiteral}, exact: true }}).first()";
-                }
-                else
-                {
-                    // Gizli kopyalar için :visible kuralımız yerinde duruyor
-                    return $"locator('{Escape(tag)}:visible').filter({{ hasText: {textLiteral} }}).first()";
-                }
+                if (tag == "button") return $"locator('button:visible').filter({{ hasText: {quote}{procText}{quote} }}).first()";
+                if (tag == "a") return $"locator('a:visible').filter({{ hasText: {quote}{procText}{quote} }}).first()";
+                
+                return $"locator('{tag}:visible').filter({{ hasText: {quote}{procText}{quote} }}).first()";
             }
 
-            return $"locator('{Escape(cssSelector)}').first()";
+            // 8. Name Attribute
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                return $"locator('[name=\"{EscapeDoubleQuoted(name)}\"]').first()";
+            }
+
+            // 9. Css Selector
+            if (!string.IsNullOrWhiteSpace(cssSelector))
+            {
+                return $"locator('{EscapeDoubleQuoted(cssSelector)}').first()";
+            }
+
+            return "locator('*').first()";
         }
 
         // ====================================================================
@@ -1524,22 +1551,23 @@ namespace PlaywrightSmartRecorder.Parser
         // ====================================================================
         // NAVIGATION WAIT END
         // ====================================================================
-
         private void EmitNavigationWaitEnd(
             StringBuilder sb,
             string pageAlias,
             string promiseName)
         {
             sb.AppendLine();
-            sb.AppendLine($"// Başarılı olan manuel scriptinizdeki 'waitForURL' mantığının dinamik versiyonu:");
-            sb.AppendLine($"// Dış SSO adreslerini atlar, kendi domainimize dönüldüğünde ve path değiştiğinde beklemeyi bitirir.");
+            sb.AppendLine($"// Test anındaki dinamik duruma göre URL'nin değişip değişmeyeceği kontrol ediliyor.");
             sb.AppendLine($"try {{");
+            sb.AppendLine($"    // Eğer URL değişecekse (farklı modülden gelindiyse) en fazla 3 saniye içinde bunu yakalar ve bekler.");
             sb.AppendLine($"    await {pageAlias}.waitForURL(url =>");
             sb.AppendLine($"        url.origin === prevUrlObj_{promiseName}.origin &&");
             sb.AppendLine($"        url.pathname !== prevUrlObj_{promiseName}.pathname,");
-            sb.AppendLine($"    {{ waitUntil: 'domcontentloaded', timeout: 15000 }});");
+            sb.AppendLine($"    {{ waitUntil: 'domcontentloaded', timeout: 3000 }});");
             sb.AppendLine($"}} catch (e) {{");
-            sb.AppendLine($"    // Kategoriye tıklama gibi SPA içi URL değişmeyen ekran yenilenmelerinde hatayı yut ve devam et.");
+            sb.AppendLine($"    // 3 saniye içinde URL değişmediyse, zaten doğru URL'de olduğumuzu anlar.");
+            sb.AppendLine($"    // Bu durumda sadece arayüzün (SPA) yenilenmesini ve ağın sakinleşmesini dinleyip hızla devam eder.");
+            sb.AppendLine($"    await {pageAlias}.waitForLoadState('networkidle', {{ timeout: 3000 }}).catch(() => {{}});");
             sb.AppendLine($"}}");
         }
 

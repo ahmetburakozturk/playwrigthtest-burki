@@ -89,6 +89,9 @@ namespace PlaywrightSmartRecorder.Core.Models
 
         // Örn: Kullanıcı Adı
         public string ExtractionLabel { get; init; } = "";
+        public int ExtractionLabelIndex { get; init; } = 0;
+        public string ExtractPrefix { get; init; } = "";
+        public string ExtractSuffix { get; init; } = "";
     }
 
     // ========================================================================

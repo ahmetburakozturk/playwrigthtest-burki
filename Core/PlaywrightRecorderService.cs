@@ -918,8 +918,9 @@ namespace PlaywrightSmartRecorder.Core
                             
                             let matchedLabel = '';
                             let extMode = '';
+                            let matchedLabelIndex = 0; // YENİ: Sıra numarası
 
-                            // 1. Önce DİKEY (Vertical) tabloyu dene (En güvenli ve yaygın olanı)
+                            // 1. Önce DİKEY (Vertical) tabloyu dene
                             for (const row of rows) {
                                 const cells = Array.from(row.querySelectorAll('th, td'));
                                 if (cells.length < 2) continue;
@@ -930,6 +931,19 @@ namespace PlaywrightSmartRecorder.Core
                                 if (value && (value === selected || value.includes(selected) || selected.includes(value))) {
                                     matchedLabel = label;
                                     extMode = 'PopoverVertical';
+                                    
+                                    // Aynı etiketten (Kullanıcı Adı) bu satıra kadar kaç tane var sayıyoruz
+                                    let count = 0;
+                                    for (const r of rows) {
+                                        const c = Array.from(r.querySelectorAll('th, td'));
+                                        if (c.length > 0 && normalizeText(c[0].textContent || '') === label) {
+                                            if (r === row) {
+                                                matchedLabelIndex = count;
+                                                break;
+                                            }
+                                            count++;
+                                        }
+                                    }
                                     break;
                                 }
                             }
@@ -945,6 +959,7 @@ namespace PlaywrightSmartRecorder.Core
                                             if (headers[j]) {
                                                 matchedLabel = headers[j];
                                                 extMode = 'PopoverHorizontal';
+                                                matchedLabelIndex = i - 1; // Veri satırı indeksi (ilk veri 0)
                                             }
                                             break;
                                         }
@@ -956,7 +971,8 @@ namespace PlaywrightSmartRecorder.Core
                             return {
                                 attributeName: attributeName,
                                 extractionLabel: matchedLabel,
-                                extractionMode: matchedLabel ? extMode : 'Attribute'
+                                extractionMode: matchedLabel ? extMode : 'Attribute',
+                                extractionLabelIndex: matchedLabelIndex // YENİ
                             };
                         };
 
@@ -1150,123 +1166,105 @@ namespace PlaywrightSmartRecorder.Core
                                 );
                             };
 
-                        // ====================================================
-                        // COPY / EXTRACTION
-                        // ====================================================
-
                         window.addEventListener(
                             'copy',
                             (e) => {
-                                const selection =
-                                    window.getSelection();
+                                const selection = window.getSelection();
+                                const text = normalizeText(selection?.toString() || '').trim();
 
-                                const text =
-                                    normalizeText(
-                                        selection
-                                            ?.toString() ||
-                                        ''
-                                    );
-
-                                if (
-                                    !text ||
-                                    !selection ||
-                                    selection.rangeCount ===
-                                        0
-                                ) {
+                                if (!text || !selection || selection.rangeCount === 0) {
                                     return;
                                 }
 
-                                let node =
-                                    selection
-                                        .getRangeAt(
-                                            0
-                                        )
-                                        .commonAncestorContainer;
+                                let node = selection.getRangeAt(0).commonAncestorContainer;
+                                let el = node.nodeType === 3 ? node.parentNode : node;
 
-                                let el =
-                                    node.nodeType === 3
-                                        ? node.parentNode
-                                        : node;
+                                // 1. ÖNCE: TAŞAN SEÇİM (COMMON ANCESTOR) KORUMASI 
+                                // Eğer kullanıcı dışa taştıysa, en doğru ve dar alt elementi (örn: hücreyi) buluruz.
+                                if (el.children && el.children.length > 0) {
+                                    const allDescendants = Array.from(el.querySelectorAll('*'));
+                                    let bestMatch = null;
 
-                                const popoverSource =
-                                    findPopoverSource(
-                                        el,
-                                        text
-                                    );
+                                    for (const child of allDescendants) {
+                                        const childText = normalizeText(child.textContent || '').trim();
+                                        
+                                        // Kusursuz Eşleşme
+                                        if (childText === text) {
+                                            bestMatch = child;
+                                            break;
+                                        }
+                                        
+                                        // Kısmi Eşleşme
+                                        if (childText.includes(text)) {
+                                            if (!bestMatch) {
+                                                bestMatch = child;
+                                            } else {
+                                                const currentDiff = Math.abs(normalizeText(bestMatch.textContent || '').trim().length - text.length);
+                                                const newDiff = Math.abs(childText.length - text.length);
+                                                
+                                                if (newDiff < currentDiff) {
+                                                    bestMatch = child;
+                                                }
+                                            }
+                                        }
+                                    }
 
-                                if (
-                                    popoverSource
-                                ) {
-                                    const popoverInfo =
-                                        getPopoverExtractionInfo(
-                                            popoverSource,
-                                            text
-                                        );
+                                    if (bestMatch) {
+                                        el = bestMatch; // Geniş TR yerine, nokta atışı TD'yi hedef element yaptık!
+                                    }
+                                }
 
-                                    const sourceInfo =
-                                        getElementInfo(
-                                            popoverSource
-                                        );
+                                // 2. SONRA: AKILLI METİN KIRPMA (SUBSTRING) TESPİTİ
+                                // En doğru/dar elementi (el) bulduktan sonra, o elementin içinde 
+                                // kullanıcının seçmediği (kalan) fazlalıkları tespit ediyoruz.
+                                const fullNodeText = normalizeText(el.textContent || '');
+                                let extractPrefix = '';
+                                let extractSuffix = '';
 
-                                    if (
-                                        popoverInfo
-                                    ) {
+                                if (text && fullNodeText && fullNodeText !== text && fullNodeText.includes(text)) {
+                                    const startIndex = fullNodeText.indexOf(text);
+                                    extractPrefix = fullNodeText.substring(0, startIndex);
+                                    extractSuffix = fullNodeText.substring(startIndex + text.length);
+                                }
+
+                                const popoverSource = findPopoverSource(el, text);
+
+                                if (popoverSource) {
+                                    const popoverInfo = getPopoverExtractionInfo(popoverSource, text);
+                                    const sourceInfo = getElementInfo(popoverSource);
+
+                                    if (popoverInfo) {
                                         window.smartRecorderEmit(
                                             JSON.stringify({
-                                                actionType:
-                                                    'Extract',
-
+                                                actionType: 'Extract',
                                                 ...sourceInfo,
-
-                                                extractedValue:
-                                                    text,
-
-                                                extractionMode:
-                                                    popoverInfo.extractionMode,
-
-                                                attributeName:
-                                                    popoverInfo.attributeName,
-
-                                                extractionLabel:
-                                                    popoverInfo.extractionLabel,
-
-                                                ...getClientEventMetadata(
-                                                    'Extract'
-                                                )
+                                                extractedValue: text,
+                                                extractionMode: popoverInfo.extractionMode,
+                                                attributeName: popoverInfo.attributeName,
+                                                extractionLabel: popoverInfo.extractionLabel,
+                                                extractionLabelIndex: popoverInfo.extractionLabelIndex,
+                                                extractPrefix: extractPrefix, // YENİ
+                                                extractSuffix: extractSuffix, // YENİ
+                                                ...getClientEventMetadata('Extract')
                                             })
                                         );
-
                                         return;
                                     }
                                 }
 
-                                const info =
-                                    getElementInfo(
-                                        el
-                                    );
+                                const info = getElementInfo(el);
 
                                 window.smartRecorderEmit(
                                     JSON.stringify({
-                                        actionType:
-                                            'Extract',
-
+                                        actionType: 'Extract',
                                         ...info,
-
-                                        extractedValue:
-                                            text,
-
-                                        extractionMode:
-                                            'Text',
-
-                                        attributeName:
-                                            '',
-
-                                        extractionLabel:
-                                            '',
-
-                                        ...getClientEventMetadata(
-                                            'Extract'
-                                        )
+                                        extractedValue: text,
+                                        extractionMode: 'Text',
+                                        attributeName: '',
+                                        extractionLabel: '',
+                                        extractPrefix: extractPrefix, // YENİ
+                                        extractSuffix: extractSuffix, // YENİ
+                                        ...getClientEventMetadata('Extract')
                                     })
                                 );
                             },
