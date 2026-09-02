@@ -18,11 +18,6 @@ namespace PlaywrightSmartRecorder.Parser
             // ================================================================
             // ORIGINAL ORDER
             // ================================================================
-            //
-            // GLOBAL TIMESTAMP SORTING YOK.
-            //
-            // Recorder artık navigation türünü kendisi belirliyor.
-            // ================================================================
 
             var actions =
                 new List<UserAction>(
@@ -38,55 +33,38 @@ namespace PlaywrightSmartRecorder.Parser
             // ================================================================
             // CLEANUP
             // ================================================================
-
-            actions =
-                CleanupActions(
-                    actions);
+            actions = CleanupActions(actions);
 
             // ================================================================
             // TYPESCRIPT HEADER
             // ================================================================
+            var sb = new StringBuilder();
 
-            var sb =
-                new StringBuilder();
-
-            sb.AppendLine(
-                "import { test, expect } from '@playwright/test';");
-
+            sb.AppendLine("import { expect, test, reportStepInfo, reportStepPass, reportStepFail } from '@turkcell/playwright-framework';");
+            sb.AppendLine("import dotenv from 'dotenv';");
             sb.AppendLine();
-
-            sb.AppendLine(
-                "test('SenseWright Auto-Generated E2E Test', async ({ page, context }) => {");
+            sb.AppendLine("dotenv.config();");
+            sb.AppendLine();
+            sb.AppendLine("test('SenseWright Auto-Generated E2E Test', async ({ page, context }) => {");
+            sb.AppendLine("    test.setTimeout(600_000); // 10 dakikalık genel timeout");
+            sb.AppendLine();
+            
+            sb.AppendLine("    try {");
 
             // ================================================================
             // PAGE STATE
             // ================================================================
 
-            var declaredPages =
-                new HashSet<string>(
-                    StringComparer.OrdinalIgnoreCase)
-                {
-                    "page"
-                };
-
-            var firstNavigationByPage =
-                new HashSet<string>(
-                    StringComparer.OrdinalIgnoreCase);
-
-            var lastRecordedUrlByPage =
-                new Dictionary<string, string>(
-                    StringComparer.OrdinalIgnoreCase);
-
-            string lastGeneratedPageAlias =
-                "page";
+            var declaredPages = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "page" };
+            var firstNavigationByPage = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var lastRecordedUrlByPage = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string lastGeneratedPageAlias = "page";
 
             // ================================================================
             // DYNAMIC VARIABLES
             // ================================================================
 
-            var dynamicVariables =
-                new Dictionary<string, string>();
-
+            var dynamicVariables = new Dictionary<string, string>();
             int varCounter = 1;
 
             // ================================================================
@@ -99,54 +77,28 @@ namespace PlaywrightSmartRecorder.Parser
             // ACTION LOOP
             // ================================================================
 
-            for (
-                int i = 0;
-                i < actions.Count;
-                i++)
+            for (int i = 0; i < actions.Count; i++)
             {
-                var action =
-                    actions[i];
+                var action = actions[i];
 
-                string p =
-                    string.IsNullOrWhiteSpace(
-                        action.PageAlias)
-                        ? "page"
-                        : action.PageAlias;
+                string p = string.IsNullOrWhiteSpace(action.PageAlias) ? "page" : action.PageAlias;
 
                 // ============================================================
                 // TAB OPENED
                 // ============================================================
 
-                if (
-                    action is TabOpenedAction tabOpened
-                )
+                if (action is TabOpenedAction tabOpened)
                 {
                     sb.AppendLine();
+                    sb.AppendLine("        // Uygulamanın açtığı yeni sekmeyi dinamik olarak yakala");
+                    sb.AppendLine($"        while (context.pages().length <= {declaredPages.Count}) {{");
+                    sb.AppendLine("            await page.waitForTimeout(100);");
+                    sb.AppendLine("        }");
+                    sb.AppendLine($"        const {p} = context.pages()[context.pages().length - 1];");
+                    sb.AppendLine($"        await {p}.waitForLoadState('domcontentloaded');");
 
-                    sb.AppendLine(
-                        "// Uygulamanın açtığı yeni sekmeyi dinamik olarak yakala");
-
-                    sb.AppendLine(
-                        $"while (context.pages().length <= {declaredPages.Count}) {{");
-
-                    sb.AppendLine(
-                        "    await page.waitForTimeout(100);");
-
-                    sb.AppendLine(
-                        "}");
-
-                    sb.AppendLine(
-                        $"const {p} = context.pages()[context.pages().length - 1];");
-
-                    sb.AppendLine(
-                        $"await {p}.waitForLoadState('domcontentloaded');");
-
-                    declaredPages.Add(
-                        p);
-
-                    lastGeneratedPageAlias =
-                        p;
-
+                    declaredPages.Add(p);
+                    lastGeneratedPageAlias = p;
                     continue;
                 }
 
@@ -154,293 +106,102 @@ namespace PlaywrightSmartRecorder.Parser
                 // TAB ACTIVATED
                 // ============================================================
 
-                if (
-                    action is TabActivatedAction
-                )
+                if (action is TabActivatedAction)
                 {
-                    if (
-                        !string.Equals(
-                            lastGeneratedPageAlias,
-                            p,
-                            StringComparison.OrdinalIgnoreCase)
-                    )
+                    if (!string.Equals(lastGeneratedPageAlias, p, StringComparison.OrdinalIgnoreCase))
                     {
                         sb.AppendLine();
-
-                        sb.AppendLine(
-                            $"// Kullanıcı browser sekmeleri arasında {p} sekmesine geçti.");
-
-                        sb.AppendLine(
-                            $"await {p}.bringToFront();");
-
-                        lastGeneratedPageAlias =
-                            p;
+                        sb.AppendLine($"        // Kullanıcı browser sekmeleri arasında {p} sekmesine geçti.");
+                        sb.AppendLine($"        await {p}.bringToFront();");
+                        lastGeneratedPageAlias = p;
                     }
-
                     continue;
                 }
 
                 // ============================================================
                 // PAGE ALIAS CHANGE
                 // ============================================================
-                //
-                // TabActivatedAction kaydı gelmese bile PageAlias değişiminden
-                // gerçek page switch'i anlayabiliriz.
-                // ============================================================
 
-                if (
-                    !string.Equals(
-                        lastGeneratedPageAlias,
-                        p,
-                        StringComparison.OrdinalIgnoreCase)
-                )
+                if (!string.Equals(lastGeneratedPageAlias, p, StringComparison.OrdinalIgnoreCase))
                 {
                     sb.AppendLine();
-
-                    sb.AppendLine(
-                        $"// Kullanıcı browser sekmeleri arasında {p} sekmesine geçti.");
-
-                    sb.AppendLine(
-                        $"await {p}.bringToFront();");
-
-                    lastGeneratedPageAlias =
-                        p;
+                    sb.AppendLine($"        // Kullanıcı browser sekmeleri arasında {p} sekmesine geçti.");
+                    sb.AppendLine($"        await {p}.bringToFront();");
+                    lastGeneratedPageAlias = p;
                 }
 
                 // ============================================================
                 // NAVIGATION
                 // ============================================================
 
-                if (
-                    action is NavigationAction nav
-                )
+                if (action is NavigationAction nav)
                 {
-                    string navPage =
-                        string.IsNullOrWhiteSpace(
-                            nav.PageAlias)
-                                ? "page"
-                                : nav.PageAlias;
+                    string navPage = string.IsNullOrWhiteSpace(nav.PageAlias) ? "page" : nav.PageAlias;
 
-                    // --------------------------------------------------------
-                    // INITIAL
-                    // --------------------------------------------------------
-
-                    if (
-                        nav.NavigationKind.Equals(
-                            "Initial",
-                            StringComparison.OrdinalIgnoreCase)
-                    )
+                    if (nav.NavigationKind.Equals("Initial", StringComparison.OrdinalIgnoreCase))
                     {
-                        string origin =
-                            GetOrigin(
-                                nav.Url);
-
-                        string relativeUrl =
-                            GetRelativeUrl(
-                                nav.Url);
+                        string origin = GetOrigin(nav.Url);
+                        string relativeUrl = GetRelativeUrl(nav.Url);
 
                         sb.AppendLine();
-
-                        sb.AppendLine(
-                            $"const baseUrl = (process.env.BASE_URL ?? '{Escape(origin)}').replace(/\\/+$/, '');");
-
+                        sb.AppendLine($"        const baseUrl = (process.env.BASE_URL ?? '{Escape(origin)}').replace(/\\/+$/, '');");
                         sb.AppendLine();
+                        sb.AppendLine("        // Test başlangıç sayfasına gidiliyor.");
+                        sb.AppendLine($"        await {navPage}.goto(new URL('{Escape(relativeUrl)}', baseUrl).toString(), {{ waitUntil: 'load' }});");
 
-                        sb.AppendLine(
-                            "// Test başlangıç sayfasına gidiliyor.");
-
-                        sb.AppendLine(
-                            $"await {navPage}.goto(new URL('{Escape(relativeUrl)}', baseUrl).toString(), {{ waitUntil: 'load' }});");
-
-                        firstNavigationByPage.Add(
-                            navPage);
-
-                        lastRecordedUrlByPage[
-                            navPage] =
-                            nav.Url;
-
+                        firstNavigationByPage.Add(navPage);
+                        lastRecordedUrlByPage[navPage] = nav.Url;
                         continue;
                     }
 
-                    // --------------------------------------------------------
-                    // FIRST NAVIGATION OF NEW TAB
-                    // --------------------------------------------------------
-                    //
-                    // TabOpenedAction zaten yeni page'i yakalıyor.
-                    // İlk navigation'ı tekrar üretme.
-                    // --------------------------------------------------------
-
-                    if (
-                        !firstNavigationByPage.Contains(
-                            navPage)
-                    )
+                    if (!firstNavigationByPage.Contains(navPage))
                     {
-                        firstNavigationByPage.Add(
-                            navPage);
-
-                        lastRecordedUrlByPage[
-                            navPage] =
-                            nav.Url;
-
+                        firstNavigationByPage.Add(navPage);
+                        lastRecordedUrlByPage[navPage] = nav.Url;
                         continue;
                     }
 
-                    // --------------------------------------------------------
-                    // USER ACTION
-                    // --------------------------------------------------------
-                    //
-                    // Click / Enter / Select kendi navigation wait'ini
-                    // zaten üretir.
-                    // --------------------------------------------------------
-
-                    if (
-                        nav.NavigationKind.Equals(
-                            "UserAction",
-                            StringComparison.OrdinalIgnoreCase)
-                    )
+                    if (nav.NavigationKind.Equals("UserAction", StringComparison.OrdinalIgnoreCase) || 
+                        nav.NavigationKind.Equals("Automatic", StringComparison.OrdinalIgnoreCase))
                     {
-                        lastRecordedUrlByPage[
-                            navPage] =
-                            nav.Url;
-
+                        lastRecordedUrlByPage[navPage] = nav.Url;
                         continue;
                     }
 
-                    // --------------------------------------------------------
-                    // AUTOMATIC
-                    // --------------------------------------------------------
-                    //
-                    // Login redirect / server redirect / SPA automatic
-                    // navigation.
-                    //
-                    // URL ile tekrar goto yapma.
-                    // --------------------------------------------------------
-
-                    if (
-                        nav.NavigationKind.Equals(
-                            "Automatic",
-                            StringComparison.OrdinalIgnoreCase)
-                    )
-                    {
-                        lastRecordedUrlByPage[
-                            navPage] =
-                            nav.Url;
-
-                        continue;
-                    }
-
-                    // --------------------------------------------------------
-                    // RELOAD
-                    // --------------------------------------------------------
-
-                    if (
-                        nav.NavigationKind.Equals(
-                            "Reload",
-                            StringComparison.OrdinalIgnoreCase)
-                    )
+                    if (nav.NavigationKind.Equals("Reload", StringComparison.OrdinalIgnoreCase))
                     {
                         sb.AppendLine();
-
-                        sb.AppendLine(
-                            "// Kullanıcı sayfayı yeniledi.");
-
-                        sb.AppendLine(
-                            $"await {navPage}.reload({{ waitUntil: 'load' }});");
-
-                        lastRecordedUrlByPage[
-                            navPage] =
-                            nav.Url;
-
+                        sb.AppendLine("        // Kullanıcı sayfayı yeniledi.");
+                        sb.AppendLine($"        await {navPage}.reload({{ waitUntil: 'load' }});");
+                        lastRecordedUrlByPage[navPage] = nav.Url;
                         continue;
                     }
 
-                    // --------------------------------------------------------
-                    // HISTORY
-                    // --------------------------------------------------------
-
-                    if (
-                        nav.NavigationKind.Equals(
-                            "History",
-                            StringComparison.OrdinalIgnoreCase)
-                    )
+                    if (nav.NavigationKind.Equals("History", StringComparison.OrdinalIgnoreCase))
                     {
-                        // Bu action modelinde back/forward yönü ayrıca
-                        // tutulmuyor. NavigationHistory index'i eklenene kadar
-                        // güvenli davranış olarak mevcut dokümanın yüklenmesini
-                        // bekliyoruz.
                         sb.AppendLine();
-
-                        sb.AppendLine(
-                            "// Browser history navigation gerçekleşti.");
-
-                        sb.AppendLine(
-                            $"await {navPage}.waitForLoadState('load');");
-
-                        lastRecordedUrlByPage[
-                            navPage] =
-                            nav.Url;
-
+                        sb.AppendLine("        // Browser history navigation gerçekleşti.");
+                        sb.AppendLine($"        await {navPage}.waitForLoadState('load');");
+                        lastRecordedUrlByPage[navPage] = nav.Url;
                         continue;
                     }
 
-                    // --------------------------------------------------------
-                    // MANUAL URL
-                    // --------------------------------------------------------
-
-                    if (
-                        nav.NavigationKind.Equals(
-                            "Manual",
-                            StringComparison.OrdinalIgnoreCase)
-                    )
+                    if (nav.NavigationKind.Equals("Manual", StringComparison.OrdinalIgnoreCase))
                     {
-                        string manualUrl =
-                            !string.IsNullOrWhiteSpace(
-                                nav.UserTypedUrl)
-                                    ? nav.UserTypedUrl
-                                    : nav.Url;
-
-                        // ----------------------------------------------------
-                        // Manual URL absolute ise path/query/fragment al.
-                        //
-                        // Böylece generated test environment host'una
-                        // mümkün olduğunca bağımlı kalmaz.
-                        // ----------------------------------------------------
-
-                        string relativeUrl =
-                            GetRelativeUrl(
-                                manualUrl);
+                        string manualUrl = !string.IsNullOrWhiteSpace(nav.UserTypedUrl) ? nav.UserTypedUrl : nav.Url;
+                        string relativeUrl = GetRelativeUrl(manualUrl);
 
                         sb.AppendLine();
-
-                        sb.AppendLine(
-                            "// Kullanıcı browser adres çubuğundan manuel olarak URL değiştirdi.");
-
-                        sb.AppendLine(
-                            $"await {navPage}.goto(new URL('{Escape(relativeUrl)}', {navPage}.url()).toString(), {{ waitUntil: 'load' }});");
-
-                        lastRecordedUrlByPage[
-                            navPage] =
-                            manualUrl;
-
+                        sb.AppendLine("        // Kullanıcı browser adres çubuğundan manuel olarak URL değiştirdi.");
+                        sb.AppendLine($"        await {navPage}.goto(new URL('{Escape(relativeUrl)}', {navPage}.url()).toString(), {{ waitUntil: 'load' }});");
+                        lastRecordedUrlByPage[navPage] = manualUrl;
                         continue;
                     }
-
-                    // --------------------------------------------------------
-                    // UNKNOWN
-                    // --------------------------------------------------------
 
                     sb.AppendLine();
-
-                    sb.AppendLine(
-                        "// Navigation kaynağı güvenilir şekilde belirlenemedi; mevcut dokümanın yüklenmesi bekleniyor.");
-
-                    sb.AppendLine(
-                        $"await {navPage}.waitForLoadState('load');");
-
-                    lastRecordedUrlByPage[
-                        navPage] =
-                            nav.Url;
-
+                    sb.AppendLine("        // Navigation kaynağı güvenilir şekilde belirlenemedi; mevcut dokümanın yüklenmesi bekleniyor.");
+                    sb.AppendLine($"        await {navPage}.waitForLoadState('load');");
+                    lastRecordedUrlByPage[navPage] = nav.Url;
                     continue;
                 }
 
@@ -450,26 +211,16 @@ namespace PlaywrightSmartRecorder.Parser
 
                 if (action is HoverAction hover)
                 {
-                    string locator = BuildModernLocator(
-                        hover.Placeholder,
-                        hover.AriaLabel,
-                        hover.TextContent,
-                        hover.ElementId,
-                        hover.Tag,
-                        hover.Name,
-                        hover.CssSelector,
-                        hover.IsDynamicListElement,
-                        hover.CustomTestId,
-                        "Hover",
-                        dynamicVariables); // Parametremizi de unutmuyoruz
-
+                    string elemDesc = GetElementDescription(hover.Placeholder, hover.AriaLabel, hover.TextContent, hover.ElementId, hover.CssSelector, hover.Tag);
                     sb.AppendLine();
-                    sb.AppendLine("// Tooltip/Pop-up açmak için element üzerinde hover");
-                    sb.AppendLine("// Not: Yanlışlıkla oluşan veya ID'si dinamik değişen hover'ların testi patlatmaması için 2 saniyelik esnek (soft) bekleme konuldu.");
-                    
-                    // DEĞİŞEN KISIM: .hover() metoduna timeout ve catch() ekliyoruz.
-                    sb.AppendLine($"await {hover.PageAlias}.{locator}.hover({{ timeout: 2000 }}).catch(() => {{}});");
+                    sb.AppendLine($"        await reportStepInfo('Hover: {elemDesc} üzerine geliniyor.');");
 
+                    string locator = BuildModernLocator(
+                        hover.Placeholder, hover.AriaLabel, hover.TextContent, hover.ElementId, hover.Tag, hover.Name,
+                        hover.CssSelector, hover.IsDynamicListElement, hover.CustomTestId, "Hover", dynamicVariables);
+
+                    sb.AppendLine("        // Tooltip/Pop-up açmak için element üzerinde hover");
+                    sb.AppendLine($"        await {hover.PageAlias}.{locator}.hover({{ timeout: 2000 }}).catch(() => {{}});");
                     continue;
                 }
 
@@ -477,37 +228,20 @@ namespace PlaywrightSmartRecorder.Parser
                 // EXTRACT
                 // ============================================================
 
-                if (
-                    action is ExtractAction ext
-                )
+                if (action is ExtractAction ext)
                 {
-                    string varName =
-                        $"dynamicUserVar_{varCounter++}";
+                    string elemDesc = GetElementDescription(ext.Placeholder, ext.AriaLabel, "", ext.ElementId, ext.CssSelector, ext.Tag);
+                    sb.AppendLine();
+                    sb.AppendLine($"        await reportStepInfo('Veri Okuma: {elemDesc} alanından veri kopyalanıyor.');");
 
-                    dynamicVariables[
-                        ext.ExtractedValue] =
-                        varName;
+                    string varName = $"dynamicUserVar_{varCounter++}";
+                    dynamicVariables[ext.ExtractedValue] = varName;
 
-                    string locator =
-                        BuildModernLocator(
-                            ext.Placeholder,
-                            ext.AriaLabel,
-                            "",
-                            ext.ElementId,
-                            ext.Tag,
-                            ext.Name,
-                            ext.CssSelector,
-                            ext.IsDynamicListElement,
-                            ext.CustomTestId,
-                            "Extract",
-                            dynamicVariables);
+                    string locator = BuildModernLocator(
+                        ext.Placeholder, ext.AriaLabel, "", ext.ElementId, ext.Tag, ext.Name,
+                        ext.CssSelector, ext.IsDynamicListElement, ext.CustomTestId, "Extract", dynamicVariables);
 
-                    GenerateExtraction(
-                        sb,
-                        ext,
-                        locator,
-                        varName);
-
+                    GenerateExtraction(sb, ext, locator, varName);
                     continue;
                 }
 
@@ -515,43 +249,27 @@ namespace PlaywrightSmartRecorder.Parser
                 // INPUT
                 // ============================================================
 
-                if (
-                    action is InputAction input
-                )
+                if (action is InputAction input)
                 {
-                    string locator =
-                        BuildModernLocator(
-                            input.Placeholder,
-                            input.AriaLabel,
-                            input.TextContent,
-                            input.ElementId,
-                            input.Tag,
-                            input.Name,
-                            input.CssSelector,
-                            input.IsDynamicListElement,
-                            input.CustomTestId,
-                            "Input");
+                    string elemDesc = GetElementDescription(input.Placeholder, input.AriaLabel, input.TextContent, input.ElementId, input.CssSelector, input.Tag);
+                    sb.AppendLine();
+                    sb.AppendLine($"        await reportStepInfo('Veri Girişi: {elemDesc} alanına veri yazılıyor.');");
 
-                    if (
-                        dynamicVariables.TryGetValue(
-                            input.Value,
-                            out string matchedVar)
-                    )
+                    string locator = BuildModernLocator(
+                        input.Placeholder, input.AriaLabel, input.TextContent, input.ElementId, input.Tag, input.Name,
+                        input.CssSelector, input.IsDynamicListElement, input.CustomTestId, "Input");
+
+                    string cleanInputValue = input.Value != null ? input.Value.Trim() : "";
+
+                    if (dynamicVariables.TryGetValue(cleanInputValue, out string matchedVar))
                     {
-                        sb.AppendLine();
-
-                        sb.AppendLine(
-                            "// Hafızadaki dinamik değişken alana dolduruluyor");
-
-                        sb.AppendLine(
-                            $"await {input.PageAlias}.{locator}.fill({matchedVar});");
+                        sb.AppendLine("        // Hafızadaki dinamik değişken alana dolduruluyor");
+                        sb.AppendLine($"        await {input.PageAlias}.{locator}.fill({matchedVar});");
                     }
                     else
                     {
-                        sb.AppendLine(
-                            $"await {input.PageAlias}.{locator}.fill('{Escape(input.Value)}');");
+                        sb.AppendLine($"        await {input.PageAlias}.{locator}.fill('{Escape(input.Value)}');");
                     }
-
                     continue;
                 }
 
@@ -559,145 +277,67 @@ namespace PlaywrightSmartRecorder.Parser
                 // CLICK
                 // ============================================================
 
-                if (
-                    action is ClickAction click
-                )
+                if (action is ClickAction click)
                 {
-                    bool isTableOrListElement =
-                        click.Tag == "td" ||
-                        click.Tag == "tr" ||
-                        click.Tag == "th" ||
-                        click.Tag == "li";
+                    string elemDesc = GetElementDescription(click.Placeholder, click.AriaLabel, click.TextContent, click.ElementId, click.CssSelector, click.Tag);
+                    sb.AppendLine();
+                    sb.AppendLine($"        await reportStepInfo('Tıklama: {elemDesc} elementine tıklanıyor.');");
 
-                    bool isSearchDrivenSelection =
-                        click.IsDynamicListElement &&
-                        (
-                            click.Tag == "td" ||
-                            click.Tag == "th"
-                        ) &&
-                        click.RowIndex >= 0 &&
-                        WasPrecededBySearchEnter(
-                            actions,
-                            i);
+                    bool isSearchDrivenSelection = click.IsDynamicListElement && (click.Tag == "td" || click.Tag == "th") &&
+                                                   click.RowIndex >= 0 && WasPrecededBySearchEnter(actions, i);
 
-                    // ========================================================
-                    // NAVIGATION TRIGGER
-                    // ========================================================
+                    bool followsNavigation = NextActionIsNavigation(actions, i, click.PageAlias);
 
-                    bool followsNavigation =
-                        NextActionIsNavigation(actions, i, click.PageAlias);
-
-                    // ========================================================
-                    // DYNAMIC TABLE SELECTION
-                    // ========================================================
-
-                    if (
-                        isSearchDrivenSelection
-                    )
+                    if (isSearchDrivenSelection)
                     {
-                        string tableScope =
-                            !string.IsNullOrWhiteSpace(
-                                click.ParentTableId)
-                                    ? $"#{Escape(click.ParentTableId)} tbody tr"
-                                    : "tbody tr";
+                        string tableScope = !string.IsNullOrWhiteSpace(click.ParentTableId) ? $"#{Escape(click.ParentTableId)} tbody tr" : "tbody tr";
 
-                        if (
-                            followsNavigation
-                        )
+                        if (followsNavigation)
                         {
-                            string promise =
-                                $"navigationPromise_{navigationCounter++}";
-
-                            EmitNavigationWaitStart(
-                                sb,
-                                p,
-                                promise);
-
-                            sb.AppendLine();
-
-                            sb.AppendLine(
-                                $"// Arama sonrası dinamik listeden pozisyona göre seçim (kaydedilen satır index: {click.RowIndex})");
-
-                            sb.AppendLine(
-                                $"await {p}.locator('{tableScope}').nth({click.RowIndex}).click();");
-
-                            EmitNavigationWaitEnd(
-                                sb,
-                                p,
-                                promise);
+                            string promise = $"navigationPromise_{navigationCounter++}";
+                            EmitNavigationWaitStart(sb, p, promise);
+                            sb.AppendLine($"        // Arama sonrası dinamik listeden pozisyona göre seçim (kaydedilen satır index: {click.RowIndex})");
+                            sb.AppendLine($"        await {p}.locator('{tableScope}').nth({click.RowIndex}).click();");
+                            EmitNavigationWaitEnd(sb, p, promise);
                         }
                         else
                         {
-                            sb.AppendLine();
-
-                            sb.AppendLine(
-                                $"// Arama sonrası dinamik listeden pozisyona göre seçim (kaydedilen satır index: {click.RowIndex})");
-
-                            sb.AppendLine(
-                                $"await {p}.locator('{tableScope}').nth({click.RowIndex}).click();");
+                            sb.AppendLine($"        // Arama sonrası dinamik listeden pozisyona göre seçim (kaydedilen satır index: {click.RowIndex})");
+                            sb.AppendLine($"        await {p}.locator('{tableScope}').nth({click.RowIndex}).click();");
                         }
-
                         continue;
                     }
 
-                    // ========================================================
-                    // NORMAL CLICK
-                    // ========================================================
+                    string clickLocator = BuildModernLocator(
+                        click.Placeholder, click.AriaLabel, click.TextContent, click.ElementId, click.Tag, click.Name,
+                        click.CssSelector, click.IsDynamicListElement, click.CustomTestId, "Click", dynamicVariables);
 
-                    string clickLocator =
-                        BuildModernLocator(
-                            click.Placeholder,
-                            click.AriaLabel,
-                            click.TextContent,
-                            click.ElementId,
-                            click.Tag,
-                            click.Name,
-                            click.CssSelector,
-                            click.IsDynamicListElement,
-                            click.CustomTestId,
-                            "Click",
-                            dynamicVariables);
-
-                    // EKLENDİ: Bu tıklama bir ağ isteği (API/AJAX) tetikliyor mu?
                     NetworkAction triggeredNetwork = !followsNavigation ? GetTriggeredNetworkAction(actions, i, click.PageAlias) : null;
 
                     if (followsNavigation)
                     {
                         string promise = $"navigationPromise_{navigationCounter++}";
                         EmitNavigationWaitStart(sb, p, promise);
-                        sb.AppendLine($"await {p}.{clickLocator}.click();");
+                        sb.AppendLine($"        await {p}.{clickLocator}.click();");
                         EmitNavigationWaitEnd(sb, p, promise);
                     }
                     else if (triggeredNetwork != null)
                     {
-                        // Host/Query değişikliklerinden etkilenmemek için URL'den sadece Path kısmını alıyoruz.
-                        string apiPath = "";
-                        if (Uri.TryCreate(triggeredNetwork.Url, UriKind.Absolute, out Uri apiUri)) {
-                            apiPath = apiUri.AbsolutePath; 
-                        } else {
-                            apiPath = triggeredNetwork.Url;
-                        }
-
+                        string apiPath = Uri.TryCreate(triggeredNetwork.Url, UriKind.Absolute, out Uri apiUri) ? apiUri.AbsolutePath : triggeredNetwork.Url;
                         string promise = $"networkPromise_{navigationCounter++}";
 
-                        sb.AppendLine();
-                        sb.AppendLine($"// Tıklamanın tetiklediği spesifik API isteğini ({triggeredNetwork.Method} {apiPath}) yakalamak için promise oluşturuluyor.");
-                        sb.AppendLine($"const {promise} = {p}.waitForResponse(resp => resp.url().includes('{Escape(apiPath)}') && resp.request().method() === '{Escape(triggeredNetwork.Method)}', {{ timeout: 25000 }}).catch(() => {{}});");                        
-                        sb.AppendLine($"await {p}.{clickLocator}.click();");
-                        
-                        sb.AppendLine($"await {promise};");
-
-                        // 1. Ağın sakinleşme süresini (SPA ekran yenilenmesi) 10000'den 25000'e çıkarıyoruz.
-                        sb.AppendLine($"// İşlem sonrası tetiklenen ardışık veri güncellemelerinin (GET vb.) bitmesini bekliyoruz.");
-                        sb.AppendLine($"await {p}.waitForLoadState('networkidle', {{ timeout: 25000 }}).catch(() => {{}});");
-
-                        // 2. Çok ağır ekranlarda React/Vue DOM çizimi için nefes payını 500'den 1500'e (1.5 saniye) çıkarıyoruz.
-                        sb.AppendLine($"// Ön yüzün (React/Vue vb.) DOM'u tam çizmesi için kısa bir esneklik payı");
-                        sb.AppendLine($"await {p}.waitForTimeout(1500);");
+                        sb.AppendLine($"        // Tıklamanın tetiklediği spesifik API isteğini ({triggeredNetwork.Method} {apiPath}) yakalamak için promise oluşturuluyor.");
+                        sb.AppendLine($"        const {promise} = {p}.waitForResponse(resp => resp.url().includes('{Escape(apiPath)}') && resp.request().method() === '{Escape(triggeredNetwork.Method)}', {{ timeout: 25000 }}).catch(() => {{}});");                        
+                        sb.AppendLine($"        await {p}.{clickLocator}.click();");
+                        sb.AppendLine($"        await {promise};");
+                        sb.AppendLine($"        // İşlem sonrası tetiklenen ardışık veri güncellemelerinin bitmesini bekliyoruz.");
+                        sb.AppendLine($"        await {p}.waitForLoadState('networkidle', {{ timeout: 25000 }}).catch(() => {{}});");
+                        sb.AppendLine($"        // Ön yüzün DOM'u tam çizmesi için esneklik payı");
+                        sb.AppendLine($"        await {p}.waitForTimeout(1500);");
                     }
                     else
                     {
-                        sb.AppendLine($"await {p}.{clickLocator}.click();");
+                        sb.AppendLine($"        await {p}.{clickLocator}.click();");
                     }
                     continue;
                 }
@@ -706,53 +346,29 @@ namespace PlaywrightSmartRecorder.Parser
                 // SELECT
                 // ============================================================
 
-                if (
-                    action is SelectAction select
-                )
+                if (action is SelectAction select)
                 {
-                    string locator =
-                        BuildModernLocator(
-                            select.Placeholder,
-                            select.AriaLabel,
-                            select.TextContent,
-                            select.ElementId,
-                            select.Tag,
-                            select.Name,
-                            select.CssSelector,
-                            select.IsDynamicListElement,
-                            select.CustomTestId,
-                            "Select",
-                            dynamicVariables);
+                    string elemDesc = GetElementDescription(select.Placeholder, select.AriaLabel, select.TextContent, select.ElementId, select.CssSelector, select.Tag);
+                    sb.AppendLine();
+                    sb.AppendLine($"        await reportStepInfo('Seçim: {elemDesc} listesinden işlem yapılıyor.');");
 
-                    bool followsNavigation =
-                        NextActionIsNavigation(actions, i, select.PageAlias);
+                    string locator = BuildModernLocator(
+                        select.Placeholder, select.AriaLabel, select.TextContent, select.ElementId, select.Tag, select.Name,
+                        select.CssSelector, select.IsDynamicListElement, select.CustomTestId, "Select", dynamicVariables);
 
-                    if (
-                        followsNavigation
-                    )
+                    bool followsNavigation = NextActionIsNavigation(actions, i, select.PageAlias);
+
+                    if (followsNavigation)
                     {
-                        string promise =
-                            $"navigationPromise_{navigationCounter++}";
-
-                        EmitNavigationWaitStart(
-                            sb,
-                            p,
-                            promise);
-
-                        sb.AppendLine(
-                            $"await {p}.{locator}.selectOption('{Escape(select.SelectedValue)}');");
-
-                        EmitNavigationWaitEnd(
-                            sb,
-                            p,
-                            promise);
+                        string promise = $"navigationPromise_{navigationCounter++}";
+                        EmitNavigationWaitStart(sb, p, promise);
+                        sb.AppendLine($"        await {p}.{locator}.selectOption('{Escape(select.SelectedValue)}');");
+                        EmitNavigationWaitEnd(sb, p, promise);
                     }
                     else
                     {
-                        sb.AppendLine(
-                            $"await {p}.{locator}.selectOption('{Escape(select.SelectedValue)}');");
+                        sb.AppendLine($"        await {p}.{locator}.selectOption('{Escape(select.SelectedValue)}');");
                     }
-
                     continue;
                 }
 
@@ -760,58 +376,25 @@ namespace PlaywrightSmartRecorder.Parser
                 // KEYBOARD
                 // ============================================================
 
-                if (
-                    action is KeyboardAction keyboard
-                )
+                if (action is KeyboardAction keyboard)
                 {
-                    string locator =
-                        BuildModernLocator(
-                            keyboard.Placeholder,
-                            keyboard.AriaLabel,
-                            keyboard.TextContent,
-                            keyboard.ElementId,
-                            keyboard.Tag,
-                            keyboard.Name,
-                            keyboard.CssSelector,
-                            keyboard.IsDynamicListElement,
-                            keyboard.CustomTestId,
-                            "Keyboard",
-                            dynamicVariables);
+                    string locator = BuildModernLocator(
+                        keyboard.Placeholder, keyboard.AriaLabel, keyboard.TextContent, keyboard.ElementId, keyboard.Tag, keyboard.Name,
+                        keyboard.CssSelector, keyboard.IsDynamicListElement, keyboard.CustomTestId, "Keyboard", dynamicVariables);
 
-                    bool isEnter =
-                        keyboard.Key.Equals(
-                            "Enter",
-                            StringComparison.OrdinalIgnoreCase);
+                    bool followsNavigation = NextActionIsNavigation(actions, i, keyboard.PageAlias);
 
-                    bool followsNavigation =
-                        NextActionIsNavigation(actions, i, keyboard.PageAlias);
-
-                    if (
-                        followsNavigation
-                    )
+                    if (followsNavigation)
                     {
-                        string promise =
-                            $"navigationPromise_{navigationCounter++}";
-
-                        EmitNavigationWaitStart(
-                            sb,
-                            p,
-                            promise);
-
-                        sb.AppendLine(
-                            $"await {p}.{locator}.press('{Escape(keyboard.Key)}');");
-
-                        EmitNavigationWaitEnd(
-                            sb,
-                            p,
-                            promise);
+                        string promise = $"navigationPromise_{navigationCounter++}";
+                        EmitNavigationWaitStart(sb, p, promise);
+                        sb.AppendLine($"        await {p}.{locator}.press('{Escape(keyboard.Key)}');");
+                        EmitNavigationWaitEnd(sb, p, promise);
                     }
                     else
                     {
-                        sb.AppendLine(
-                            $"await {p}.{locator}.press('{Escape(keyboard.Key)}');");
+                        sb.AppendLine($"        await {p}.{locator}.press('{Escape(keyboard.Key)}');");
                     }
-
                     continue;
                 }
 
@@ -819,106 +402,81 @@ namespace PlaywrightSmartRecorder.Parser
                 // ASSERT
                 // ============================================================
 
-                if (
-                    action is AssertAction assert
-                )
+                if (action is AssertAction assert)
                 {
-                    string locator =
-                        BuildModernLocator(
-                            assert.Placeholder,
-                            assert.AriaLabel,
-                            assert.TextContent,
-                            assert.ElementId,
-                            assert.Tag,
-                            assert.Name,
-                            assert.CssSelector,
-                            assert.IsDynamicListElement,
-                            assert.CustomTestId,
-                            "Assert");
+                    string locator = BuildModernLocator(
+                        assert.Placeholder, assert.AriaLabel, assert.TextContent, assert.ElementId, assert.Tag, assert.Name,
+                        assert.CssSelector, assert.IsDynamicListElement, assert.CustomTestId, "Assert");
 
-                    sb.AppendLine(
-                        $"await expect({assert.PageAlias}.{locator}).toBeVisible();");
-
+                    sb.AppendLine($"        await expect({assert.PageAlias}.{locator}).toBeVisible();");
                     continue;
                 }
             }
 
-            sb.AppendLine(
-                "});");
+            // ================================================================
+            // TEST KAPANIŞI VE HATA YÖNETİMİ
+            // ================================================================
+            sb.AppendLine();
+            sb.AppendLine("        // Testroyer için başarılı kapanış raporlaması");
+            sb.AppendLine("        await reportStepPass('SenseWright otomatik E2E senaryosu başarıyla tamamlandı.');");
+            sb.AppendLine("    } catch (error) {");
+            sb.AppendLine("        await reportStepFail(`Test sırasında bir hata oluştu: ${error.message}`);");
+            sb.AppendLine("        throw error;");
+            sb.AppendLine("    }");
+            sb.AppendLine("});");
 
             return sb.ToString();
         }
 
         // ====================================================================
+        // RAPORLAMA İÇİN ELEMENT AÇIKLAMASI ÜRETİCİ
+        // ====================================================================
+        private string GetElementDescription(
+            string placeholder, string ariaLabel, string text, string id, string cssSelector, string tag)
+        {
+            if (!string.IsNullOrWhiteSpace(text)) return Escape(text.Trim());
+            if (!string.IsNullOrWhiteSpace(placeholder)) return Escape(placeholder.Trim());
+            if (!string.IsNullOrWhiteSpace(ariaLabel)) return Escape(ariaLabel.Trim());
+            if (!string.IsNullOrWhiteSpace(id)) return $"ID: {Escape(id)}";
+            if (!string.IsNullOrWhiteSpace(cssSelector)) return $"CSS: {Escape(cssSelector)}";
+            return Escape(tag ?? "element");
+        }
+        
+        // ====================================================================
         // SIRAYA DAYALI NAVİGASYON TESPİTİ
         // ====================================================================
-        //
-        // ClientSequence eşleştirmesi yerine: bu action'dan sonra, aynı sayfada,
-        // başka bir "gerçek" kullanıcı action'ı gelmeden önce bir NavigationAction
-        // geliyor mu diye bakıyoruz. Recorder action'ları zaten oluş sırasına göre
-        // tek listede topladığı için bu, cross-thread ID eşleştirmesinden çok
-        // daha güvenilir.
-        // ====================================================================
 
-        private bool NextActionIsNavigation(
-            List<UserAction> actions,
-            int currentIndex,
-            string pageAlias)
+        private bool NextActionIsNavigation(List<UserAction> actions, int currentIndex, string pageAlias)
         {
             for (int j = currentIndex + 1; j < actions.Count; j++)
             {
                 var next = actions[j];
-
-                // Tab açma/geçiş action'ları araya girebilir, aramaya devam et.
-                if (next is TabOpenedAction || next is TabActivatedAction)
-                {
-                    continue;
-                }
-
-                if (!string.Equals(
-                        next.PageAlias,
-                        pageAlias,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    return false;
-                }
+                if (next is TabOpenedAction || next is TabActivatedAction) continue;
+                if (!string.Equals(next.PageAlias, pageAlias, StringComparison.OrdinalIgnoreCase)) return false;
 
                 if (next is NavigationAction nav)
                 {
-                    return
-                        nav.NavigationKind.Equals("UserAction", StringComparison.OrdinalIgnoreCase) ||
-                        nav.NavigationKind.Equals("Automatic", StringComparison.OrdinalIgnoreCase);
+                    return nav.NavigationKind.Equals("UserAction", StringComparison.OrdinalIgnoreCase) ||
+                           nav.NavigationKind.Equals("Automatic", StringComparison.OrdinalIgnoreCase);
                 }
 
-                // Aynı sayfada başka bir gerçek action geldiyse, bu click/keyboard
-                // navigasyon tetiklememiş demektir.
-                if (next is ClickAction or InputAction or KeyboardAction or
-                    SelectAction or ExtractAction or HoverAction or AssertAction)
-                {
-                    return false;
-                }
+                if (next is ClickAction or InputAction or KeyboardAction or SelectAction or ExtractAction or HoverAction or AssertAction) return false;
             }
-
             return false;
         }
 
         // ====================================================================
         // SPA NETWORK (AJAX) TESPİTİ
         // ====================================================================
-        private NetworkAction GetTriggeredNetworkAction(
-            List<UserAction> actions,
-            int currentIndex,
-            string pageAlias)
+        
+        private NetworkAction GetTriggeredNetworkAction(List<UserAction> actions, int currentIndex, string pageAlias)
         {
             for (int j = currentIndex + 1; j < actions.Count; j++)
             {
                 var next = actions[j];
                 if (next is TabOpenedAction || next is TabActivatedAction) continue;
                 if (!string.Equals(next.PageAlias, pageAlias, StringComparison.OrdinalIgnoreCase)) return null;
-
-                // Tıklamadan hemen sonra bir API isteği yakalandıysa, o aksiyonu döndür
                 if (next is NetworkAction netAction) return netAction;
-                
                 if (next is NavigationAction) return null;
                 if (next is ClickAction or InputAction or KeyboardAction or SelectAction or ExtractAction or HoverAction or AssertAction) return null;
             }
@@ -928,8 +486,8 @@ namespace PlaywrightSmartRecorder.Parser
         // ====================================================================
         // EVENT RACE CONDITION FIX (REORDER)
         // ====================================================================
-        private List<UserAction> ReorderEventRaceConditions(
-            List<UserAction> source)
+        
+        private List<UserAction> ReorderEventRaceConditions(List<UserAction> source)
         {
             var result = new List<UserAction>(source);
             
@@ -938,15 +496,10 @@ namespace PlaywrightSmartRecorder.Parser
                 if (result[i] is InputAction input)
                 {
                     var prev = result[i - 1];
-                    
                     if ((prev is ClickAction prevClick && prevClick.CssSelector != input.CssSelector) ||
                         (prev is HoverAction prevHover && prevHover.CssSelector != input.CssSelector))
                     {
-                        // EKLENEN KISIM: İki işlem arasındaki zaman farkını milisaniye cinsinden ölçüyoruz.
                         long timeDelta = Math.Abs(input.ClientTimestamp - prev.ClientTimestamp);
-                        
-                        // Sadece iki işlem 1 saniyeden (1000ms) kısa sürede yapıldıysa yer değiştir (Gerçek blur/click çakışması).
-                        // Aksi takdirde, kullanıcı menüyü/alanı açmak için tıklamış ve sonra veri girmiştir. Sırayı asla bozma!
                         if (timeDelta < 1000)
                         {
                             result[i - 1] = input;
@@ -956,7 +509,6 @@ namespace PlaywrightSmartRecorder.Parser
                     }
                 }
             }
-            
             return result;
         }
         
@@ -964,224 +516,86 @@ namespace PlaywrightSmartRecorder.Parser
         // CLEANUP
         // ====================================================================
 
-        private List<UserAction> CleanupActions(
-            List<UserAction> source)
+        private List<UserAction> CleanupActions(List<UserAction> source)
         {
-            var result =
-                new List<UserAction>();
+            var result = new List<UserAction>();
 
-            for (
-                int i = 0;
-                i < source.Count;
-                i++)
+            for (int i = 0; i < source.Count; i++)
             {
-                var current =
-                    source[i];
-
-                // ============================================================
-                // CLICK
-                // ============================================================
+                var current = source[i];
 
                 if (current is ClickAction click)
                 {
                     if (result.LastOrDefault() is ClickAction previousClick)
                     {
-                        // --- YENİ EKLENEN: ZAMAN KONTROLÜ ---
                         long timeDelta = Math.Abs(click.ClientTimestamp - previousClick.ClientTimestamp);
-
-                        // Sadece 500 milisaniyeden kısa süren art arda tıklamalarda eleme (çöpe atma) yapıyoruz.
-                        // Eğer aradan 500ms'den uzun zaman geçtiyse (örn: bir pop-up'ı kapatıp diğerindekine tıklamak gibi),
-                        // bunlar bilinçli ve farklı tıklamalardır; eleme yapma!
                         if (timeDelta < 500)
                         {
-                            // 1. ARAYA HİÇBİR İŞLEM GİRMEDEN AYNI METNE TIKLAMA (Boşa tıklama / Iskalama)
                             if (!string.IsNullOrWhiteSpace(click.TextContent) && 
                                 string.Equals(click.TextContent, previousClick.TextContent, StringComparison.OrdinalIgnoreCase))
                             {
-                                // YENİ EKLENEN: Dropdown Açma Koruması
                                 bool isDropdownSequence = click.Tag == "li" || previousClick.Tag == "li";
-
-                                if (!isDropdownSequence)
-                                {
-                                    // Araya istek girmediği ve dropdown sekansı olmadığı için ilk tıklama işlevsizdir, sil.
-                                    result.RemoveAt(result.Count - 1);
-                                }
+                                if (!isDropdownSequence) result.RemoveAt(result.Count - 1);
                             }
-                            // 2. TAMAMEN AYNI CSS SELECTOR'A ÇİFT TIKLAMA
-                            else if (click.CssSelector == previousClick.CssSelector)
-                            {
-                                continue;
-                            }
+                            else if (click.CssSelector == previousClick.CssSelector) continue;
                         }
                     }
                     
-                    // Popover extraction click'i... (Aşağısı aynı kalacak)
-                    if (
-                        i < source.Count - 1 &&
-                        source[i + 1] is ExtractAction nextExtract &&
-                        IsPopoverExtraction(nextExtract)
-                    )
-                    {
-                        continue;
-                    }
+                    if (i < source.Count - 1 && source[i + 1] is ExtractAction nextExtract && IsPopoverExtraction(nextExtract)) continue;
 
-                    // Normal extraction click'i.
-                    if (
-                        i < source.Count - 1 &&
-                        source[i + 1] is ExtractAction ext
-                    )
+                    if (i < source.Count - 1 && source[i + 1] is ExtractAction ext)
                     {
-                        if (
-                            click.CssSelector == ext.CssSelector ||
-                            ext.CssSelector.Contains(click.CssSelector)
-                        )
-                        {
-                            continue;
-                        }
+                        bool selectorMatch = (!string.IsNullOrEmpty(click.CssSelector) && !string.IsNullOrEmpty(ext.CssSelector)) && 
+                                             (click.CssSelector == ext.CssSelector || ext.CssSelector.Contains(click.CssSelector) || click.CssSelector.Contains(ext.CssSelector));
+                        
+                        string cleanClickText = click.TextContent != null ? click.TextContent.Trim() : "";
+                        string cleanExtText = ext.ExtractedValue != null ? ext.ExtractedValue.Trim() : "";
+                        
+                        bool textMatch = (!string.IsNullOrEmpty(cleanClickText) && !string.IsNullOrEmpty(cleanExtText)) && 
+                                         (cleanClickText.Contains(cleanExtText) || cleanExtText.Contains(cleanClickText));
+
+                        if (selectorMatch || textMatch) continue;
                     }
                 }
-
-                // ============================================================
-                // INPUT
-                // ============================================================
-
-                else if (
-                    current is InputAction input
-                )
+                else if (current is InputAction input)
                 {
-                    var lastInput =
-                        result.LastOrDefault(
-                            a =>
-                                a is InputAction)
-                        as InputAction;
-
-                    if (
-                        lastInput != null &&
-                        lastInput.CssSelector ==
-                            input.CssSelector &&
-                        lastInput.Value ==
-                            input.Value
-                    )
-                    {
-                        continue;
-                    }
+                    var lastInput = result.LastOrDefault(a => a is InputAction) as InputAction;
+                    if (lastInput != null && lastInput.CssSelector == input.CssSelector && lastInput.Value == input.Value) continue;
                 }
-
-                // ============================================================
-                // HOVER
-                // ============================================================
-
-                else if (
-                    current is HoverAction hover
-                )
+                else if (current is HoverAction hover)
                 {
-                    if (
-                        i <
-                            source.Count - 1 &&
-                        source[i + 1]
-                            is HoverAction
-                    )
+                    if (i < source.Count - 1 && source[i + 1] is HoverAction) continue;
+                    if (i < source.Count - 1 && source[i + 1] is ExtractAction nextExtract && IsPopoverExtraction(nextExtract)) continue;
+                    if (i < source.Count - 1 && source[i + 1] is ClickAction nextClick)
                     {
-                        continue;
-                    }
-
-                    if (
-                        i <
-                            source.Count - 1 &&
-                        source[i + 1]
-                            is ExtractAction nextExtract &&
-                        IsPopoverExtraction(
-                            nextExtract)
-                    )
-                    {
-                        continue;
-                    }
-
-                    if (
-                        i <
-                            source.Count - 1 &&
-                        source[i + 1]
-                            is ClickAction nextClick
-                    )
-                    {
-                        if (
-                            nextClick.CssSelector ==
-                                hover.CssSelector ||
-                            nextClick.CssSelector.Contains(
-                                hover.CssSelector)
-                        )
-                        {
-                            continue;
-                        }
+                        if (nextClick.CssSelector == hover.CssSelector || nextClick.CssSelector.Contains(hover.CssSelector)) continue;
                     }
                 }
 
-                result.Add(
-                    current);
+                result.Add(current);
             }
-
             return result;
-        }
-
-        // ====================================================================
-        // NAVIGATION TRIGGER LOOKUP
-        // ====================================================================
-
-        private bool NavigationIsTriggeredBy(
-            List<UserAction> actions,
-            string pageAlias,
-            long clientSequence)
-        {
-            if (
-                clientSequence <= 0
-            )
-            {
-                return false;
-            }
-
-            return actions.Any(
-                action =>
-                    action is NavigationAction navigation &&
-                    navigation.NavigationKind.Equals(
-                        "UserAction",
-                        StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(
-                        navigation.PageAlias,
-                        pageAlias,
-                        StringComparison.OrdinalIgnoreCase) &&
-                    navigation.NavigationTriggerClientSequence ==
-                        clientSequence
-            );
         }
 
         // ====================================================================
         // EXTRACTION
         // ====================================================================
 
-        private void GenerateExtraction(
-            StringBuilder sb,
-            ExtractAction ext,
-            string locator,
-            string varName)
+        private void GenerateExtraction(StringBuilder sb, ExtractAction ext, string locator, string varName)
         {
             string mode = string.IsNullOrWhiteSpace(ext.ExtractionMode) ? "Text" : ext.ExtractionMode;
 
-            // 1. VERİYİ SAYFADAN ÇEKME AŞAMASI
             if (mode.Equals("Text", StringComparison.OrdinalIgnoreCase))
             {
-                sb.AppendLine();
-                sb.AppendLine("// Normal DOM text extraction");
-                sb.AppendLine($"let {varName} = (await {ext.PageAlias}.{locator}.innerText()).trim();");
+                sb.AppendLine("        // Normal DOM text extraction");
+                sb.AppendLine($"        let {varName} = (await {ext.PageAlias}.{locator}.innerText()).trim();");
             }
             else if (mode.Equals("Attribute", StringComparison.OrdinalIgnoreCase))
             {
                 string attribute = string.IsNullOrWhiteSpace(ext.AttributeName) ? "value" : ext.AttributeName;
-                sb.AppendLine();
-                sb.AppendLine($"// HTML attribute extraction: {attribute}");
-                // DİKKAT: Temizlik yapabilmek için const yerine let kullanıyoruz!
-                sb.AppendLine($"let {varName} = ((await {ext.PageAlias}.{locator}.getAttribute('{Escape(attribute)}')) ?? '').trim();");
-                sb.AppendLine();
-                sb.AppendLine($"if (!{varName}) throw new Error('Attribute extraction başarısız: {Escape(attribute)}');");
+                sb.AppendLine($"        // HTML attribute extraction: {attribute}");
+                sb.AppendLine($"        let {varName} = ((await {ext.PageAlias}.{locator}.getAttribute('{Escape(attribute)}')) ?? '').trim();");
+                sb.AppendLine($"        if (!{varName}) throw new Error('Attribute extraction başarısız: {Escape(attribute)}');");
             }
             else if (mode.StartsWith("Popover", StringComparison.OrdinalIgnoreCase))
             {
@@ -1189,38 +603,31 @@ namespace PlaywrightSmartRecorder.Parser
             }
             else
             {
-                sb.AppendLine();
-                sb.AppendLine($"// Bilinmeyen extraction mode '{Escape(mode)}'; Text fallback kullanılıyor");
-                sb.AppendLine($"let {varName} = (await {ext.PageAlias}.{locator}.innerText()).trim();");
+                sb.AppendLine($"        // Bilinmeyen extraction mode '{Escape(mode)}'; Text fallback kullanılıyor");
+                sb.AppendLine($"        let {varName} = (await {ext.PageAlias}.{locator}.innerText()).trim();");
             }
 
-            // 2. ORTAK TEMİZLİK AŞAMASI (TÜM MODLAR İÇİN GEÇERLİ!)
-            
             if (!string.IsNullOrEmpty(ext.ExtractPrefix))
             {
-                sb.AppendLine();
-                sb.AppendLine($"// Kopyalama sırasında seçilmeyen ÖN EK (Prefix) kısmı temizleniyor");
-                sb.AppendLine($"{varName} = {varName}.replace('{Escape(ext.ExtractPrefix)}', '').trim();");
+                sb.AppendLine("        // Kopyalama sırasında seçilmeyen ÖN EK (Prefix) kısmı temizleniyor");
+                sb.AppendLine($"        {varName} = {varName}.replace('{Escape(ext.ExtractPrefix)}', '').trim();");
             }
             
             if (!string.IsNullOrEmpty(ext.ExtractSuffix))
             {
-                sb.AppendLine();
-                sb.AppendLine($"// Kopyalama sırasında seçilmeyen SON EK (Suffix) kısmı temizleniyor");
-                sb.AppendLine($"{varName} = {varName}.replace('{Escape(ext.ExtractSuffix)}', '').trim();");
+                sb.AppendLine("        // Kopyalama sırasında seçilmeyen SON EK (Suffix) kısmı temizleniyor");
+                sb.AppendLine($"        {varName} = {varName}.replace('{Escape(ext.ExtractSuffix)}', '').trim();");
             }
 
             if (!string.IsNullOrWhiteSpace(ext.ExtractedValue) && ext.ExtractedValue.All(char.IsDigit))
             {
-                sb.AppendLine();
-                sb.AppendLine($"// Kullanıcı test kaydında sadece rakam kopyalamıştı, metin içindeki harf ve sembolleri temizliyoruz.");
-                sb.AppendLine($"{varName} = {varName}.replace(/[^0-9]/g, '');");
+                sb.AppendLine("        // Kullanıcı test kaydında sadece rakam kopyalamıştı, metin içindeki harf ve sembolleri temizliyoruz.");
+                sb.AppendLine($"        {varName} = {varName}.replace(/[^0-9]/g, '');");
             }
             else if (!string.IsNullOrWhiteSpace(ext.ExtractedValue))
             {
-                sb.AppendLine();
-                sb.AppendLine($"// Elementin sonundaki muhtemel gereksiz karakterleri (örn: iki nokta) temizliyoruz.");
-                sb.AppendLine($"{varName} = {varName}.replace(/[:]/g, '').trim();");
+                sb.AppendLine("        // Elementin sonundaki muhtemel gereksiz karakterleri (örn: iki nokta) temizliyoruz.");
+                sb.AppendLine($"        {varName} = {varName}.replace(/[:]/g, '').trim();");
             }
         }
 
@@ -1228,11 +635,7 @@ namespace PlaywrightSmartRecorder.Parser
         // POPOVER EXTRACTION
         // ====================================================================
 
-        private void GeneratePopoverExtraction(
-            StringBuilder sb,
-            ExtractAction ext,
-            string locator,
-            string varName)
+        private void GeneratePopoverExtraction(StringBuilder sb, ExtractAction ext, string locator, string varName)
         {
             string attributeName = string.IsNullOrWhiteSpace(ext.AttributeName) ? "data-content" : ext.AttributeName;
             string label = string.IsNullOrWhiteSpace(ext.ExtractionLabel) ? "" : ext.ExtractionLabel;
@@ -1240,65 +643,61 @@ namespace PlaywrightSmartRecorder.Parser
             int labelIndex = ext.ExtractionLabelIndex; 
 
             sb.AppendLine();
-            sb.AppendLine("// Popover/Tooltip içeriğinin DOM'a yüklenmesi ve animasyonların bitmesi için bekleme (Race Condition Koruması)");
-            sb.AppendLine($"await {ext.PageAlias}.waitForTimeout(1500);");
+            sb.AppendLine("        // Popover/Tooltip içeriğinin DOM'a yüklenmesi ve animasyonların bitmesi için bekleme");
+            sb.AppendLine($"        await {ext.PageAlias}.waitForTimeout(1500);");
             sb.AppendLine();
             
-            sb.AppendLine("// Bootstrap / HTML popover içindeki dinamik veri okunuyor");
-            sb.AppendLine($"let {varName} = await {ext.PageAlias}.{locator}.evaluate((el) => {{");
-            sb.AppendLine($"    const content = el.getAttribute('{Escape(attributeName)}') || '';");
-            sb.AppendLine($"    if (!content) throw new Error('Popover attribute bulunamadı: {Escape(attributeName)}');");
+            sb.AppendLine("        // Bootstrap / HTML popover içindeki dinamik veri okunuyor");
+            sb.AppendLine($"        let {varName} = await {ext.PageAlias}.{locator}.evaluate((el) => {{");
+            sb.AppendLine($"            const content = el.getAttribute('{Escape(attributeName)}') || '';");
+            sb.AppendLine($"            if (!content) throw new Error('Popover attribute bulunamadı: {Escape(attributeName)}');");
             
-            sb.AppendLine("    const parser = new DOMParser();");
-            sb.AppendLine("    const doc = parser.parseFromString(content, 'text/html');");
+            sb.AppendLine("            const parser = new DOMParser();");
+            sb.AppendLine("            const doc = parser.parseFromString(content, 'text/html');");
 
             if (!string.IsNullOrWhiteSpace(label))
             {
-                sb.AppendLine("    const rows = Array.from(doc.querySelectorAll('tr'));");
-                sb.AppendLine("    if (rows.length === 0) throw new Error('Popover içinde tablo bulunamadı.');");
+                sb.AppendLine("            const rows = Array.from(doc.querySelectorAll('tr'));");
+                sb.AppendLine("            if (rows.length === 0) throw new Error('Popover içinde tablo bulunamadı.');");
                 sb.AppendLine();
                 
                 if (isHorizontal)
                 {
-                    sb.AppendLine("    // Yatay (Horizontal) tablo araması");
-                    sb.AppendLine("    const headers = Array.from(rows[0].querySelectorAll('th, td')).map(h => (h.textContent || '').replace(/\\s+/g, ' ').trim());");
-                    sb.AppendLine($"    const colIndex = headers.indexOf('{Escape(label)}');");
-                    sb.AppendLine($"    if (colIndex !== -1 && rows.length > {labelIndex + 1}) {{");
-                    sb.AppendLine($"        const cells = Array.from(rows[{labelIndex + 1}].querySelectorAll('th, td'));");
-                    sb.AppendLine("        return (cells[colIndex]?.textContent || '').replace(/\\s+/g, ' ').trim();");
-                    sb.AppendLine("    }");
-                    sb.AppendLine($"    throw new Error('Yatay popover içinde \"{Escape(label)}\" sütunu bulunamadı.');");
+                    sb.AppendLine("            // Yatay (Horizontal) tablo araması");
+                    sb.AppendLine("            const headers = Array.from(rows[0].querySelectorAll('th, td')).map(h => (h.textContent || '').replace(/\\s+/g, ' ').trim());");
+                    sb.AppendLine($"            const colIndex = headers.indexOf('{Escape(label)}');");
+                    sb.AppendLine($"            if (colIndex !== -1 && rows.length > {labelIndex + 1}) {{");
+                    sb.AppendLine($"                const cells = Array.from(rows[{labelIndex + 1}].querySelectorAll('th, td'));");
+                    sb.AppendLine("                return (cells[colIndex]?.textContent || '').replace(/\\s+/g, ' ').trim();");
+                    sb.AppendLine("            }");
+                    sb.AppendLine($"            throw new Error('Yatay popover içinde \"{Escape(label)}\" sütunu bulunamadı.');");
                 }
                 else
                 {
-                    sb.AppendLine("    // Dikey (Vertical) tablo araması (Aynı etiketten birden fazla varsa Index ile filtreliyoruz)");
-                    sb.AppendLine($"    const matchingRows = rows.filter((r) => {{");
-                    sb.AppendLine("        const cells = Array.from(r.querySelectorAll('th, td'));");
-                    sb.AppendLine("        if (cells.length < 2) return false;");
-                    sb.AppendLine("        const rowLabel = (cells[0].textContent || '').replace(/\\s+/g, ' ').trim();");
-                    sb.AppendLine($"        return rowLabel === '{Escape(label)}';");
-                    sb.AppendLine("    });");
+                    sb.AppendLine("            // Dikey (Vertical) tablo araması (Aynı etiketten birden fazla varsa Index ile filtreliyoruz)");
+                    sb.AppendLine($"            const matchingRows = rows.filter((r) => {{");
+                    sb.AppendLine("                const cells = Array.from(r.querySelectorAll('th, td'));");
+                    sb.AppendLine("                if (cells.length < 2) return false;");
+                    sb.AppendLine("                const rowLabel = (cells[0].textContent || '').replace(/\\s+/g, ' ').trim();");
+                    sb.AppendLine($"                return rowLabel === '{Escape(label)}';");
+                    sb.AppendLine("            });");
                     sb.AppendLine();
-                    sb.AppendLine($"    if (matchingRows.length <= {labelIndex}) throw new Error('Dikey popover içinde \"{Escape(label)}\" etiketli {labelIndex + 1}. satır bulunamadı.');");
-                    sb.AppendLine($"    const cells = Array.from(matchingRows[{labelIndex}].querySelectorAll('th, td'));");
-                    sb.AppendLine("    return (cells[1]?.textContent || '').replace(/\\s+/g, ' ').trim();");
+                    sb.AppendLine($"            if (matchingRows.length <= {labelIndex}) throw new Error('Dikey popover içinde \"{Escape(label)}\" etiketli {labelIndex + 1}. satır bulunamadı.');");
+                    sb.AppendLine($"            const cells = Array.from(matchingRows[{labelIndex}].querySelectorAll('th, td'));");
+                    sb.AppendLine("            return (cells[1]?.textContent || '').replace(/\\s+/g, ' ').trim();");
                 }
             }
             else
             {
-                sb.AppendLine("    throw new Error('Popover extraction için ExtractionLabel bulunamadı.');");
+                sb.AppendLine("            throw new Error('Popover extraction için ExtractionLabel bulunamadı.');");
             }
 
-            sb.AppendLine("});");
+            sb.AppendLine("        });"); // Evaluate fonksiyonu burada kapanır
             sb.AppendLine();
-            sb.AppendLine($"if (!{varName}) {{");
-            sb.AppendLine($"    throw new Error('Popover extraction başarısız. Alan: {Escape(label)}');");
-            sb.AppendLine("}");
+            sb.AppendLine($"        if (!{varName}) {{");
+            sb.AppendLine($"            throw new Error('Popover extraction başarısız. Alan: {Escape(label)}');");
+            sb.AppendLine("        }");
         }
-
-        // ====================================================================
-        // POPOVER CHECK
-        // ====================================================================
 
         private bool IsPopoverExtraction(ExtractAction action)
         {
@@ -1309,74 +708,27 @@ namespace PlaywrightSmartRecorder.Parser
         // ====================================================================
         // SEARCH ENTER
         // ====================================================================
-
-        private bool WasPrecededBySearchEnter(
-            List<UserAction> actions,
-            int currentIndex)
+        
+        private bool WasPrecededBySearchEnter(List<UserAction> actions, int currentIndex)
         {
-            for (
-                int j = currentIndex - 1;
-                j >= 0 &&
-                j >= currentIndex - 5;
-                j--
-            )
+            for (int j = currentIndex - 1; j >= 0 && j >= currentIndex - 5; j--)
             {
-                var action =
-                    actions[j];
-
-                if (
-                    action is KeyboardAction keyboard &&
-                    keyboard.Key.Equals(
-                        "Enter",
-                        StringComparison.OrdinalIgnoreCase)
-                )
-                {
-                    return true;
-                }
-
-                if (
-                    action is NavigationAction ||
-                    action is TabOpenedAction ||
-                    action is TabActivatedAction
-                )
-                {
-                    return false;
-                }
-
-                if (
-                    action is ClickAction otherClick &&
-                    !(
-                        otherClick.Tag == "td" ||
-                        otherClick.Tag == "tr" ||
-                        otherClick.Tag == "th" ||
-                        otherClick.Tag == "li"
-                    )
-                )
-                {
-                    return false;
-                }
+                var action = actions[j];
+                if (action is KeyboardAction keyboard && keyboard.Key.Equals("Enter", StringComparison.OrdinalIgnoreCase)) return true;
+                if (action is NavigationAction || action is TabOpenedAction || action is TabActivatedAction) return false;
+                if (action is ClickAction otherClick && !(otherClick.Tag == "td" || otherClick.Tag == "tr" || otherClick.Tag == "th" || otherClick.Tag == "li")) return false;
             }
-
             return false;
         }
 
         // ====================================================================
         // LOCATOR BUILDER (AKILLI ELEMENT BULUCU)
         // ====================================================================
+        
         private string BuildModernLocator(
-            string placeholder,
-            string ariaLabel,
-            string text,
-            string id,
-            string tag,
-            string name,
-            string cssSelector,
-            bool isDynamicListElement,
-            string customTestId,
-            string actionType,
-            Dictionary<string, string> dynamicVariables = null)
+            string placeholder, string ariaLabel, string text, string id, string tag, string name,
+            string cssSelector, bool isDynamicListElement, string customTestId, string actionType, Dictionary<string, string> dynamicVariables = null)
         {
-            // --- YENİDEN EKLENEN: Dinamik Değişken Yerleştirme Zekası ---
             string ProcessString(string input, out bool hasVar)
             {
                 hasVar = false;
@@ -1385,7 +737,6 @@ namespace PlaywrightSmartRecorder.Parser
                 string result = Escape(input);
                 if (dynamicVariables != null && dynamicVariables.Count > 0)
                 {
-                    // Kısmi eşleşme hatalarını önlemek için en uzun metinleri önce değiştiriyoruz
                     foreach (var kvp in dynamicVariables.OrderByDescending(v => v.Key.Length))
                     {
                         if (result.Contains(Escape(kvp.Key)))
@@ -1398,22 +749,11 @@ namespace PlaywrightSmartRecorder.Parser
                 return result;
             }
 
-            // 1. Özel Test ID Koruması
-            if (!string.IsNullOrWhiteSpace(customTestId))
-            {
-                return $"locator('[data-name=\"{EscapeDoubleQuoted(customTestId)}\"], [data-testid=\"{EscapeDoubleQuoted(customTestId)}\"]').first()";
-            }
-
-            // 2. Dinamik GUID ID Koruması
+            if (!string.IsNullOrWhiteSpace(customTestId)) return $"locator('[data-name=\"{EscapeDoubleQuoted(customTestId)}\"], [data-testid=\"{EscapeDoubleQuoted(customTestId)}\"]').first()";
+            
             bool isGuidId = !string.IsNullOrWhiteSpace(id) && id.Length == 36 && id.Split('-').Length == 5;
+            if (!string.IsNullOrWhiteSpace(id) && !isGuidId) return $"locator('[id*=\"{EscapeDoubleQuoted(id)}\"]:visible').last()";
 
-            // 3. Z-Index ve Dinamik ID Uzantı Koruması
-            if (!string.IsNullOrWhiteSpace(id) && !isGuidId)
-            {
-                return $"locator('[id*=\"{EscapeDoubleQuoted(id)}\"]:visible').last()";
-            }
-
-            // 4. Placeholder (Değişken Destekli)
             if (!string.IsNullOrWhiteSpace(placeholder))
             {
                 string procPlaceholder = ProcessString(placeholder, out bool hasVar);
@@ -1421,7 +761,6 @@ namespace PlaywrightSmartRecorder.Parser
                 return $"getByPlaceholder({quote}{procPlaceholder}{quote}).first()";
             }
 
-            // 5. Aria Label (Değişken Destekli)
             if (!string.IsNullOrWhiteSpace(ariaLabel))
             {
                 string procAria = ProcessString(ariaLabel, out bool hasVar);
@@ -1429,184 +768,96 @@ namespace PlaywrightSmartRecorder.Parser
                 return $"getByLabel({quote}{procAria}{quote}).first()";
             }
 
-            // 6. Jenerik Matematiksel Sembol Koruması (+, -, x vb.)
             string trimmedText = text?.Trim() ?? "";
             bool isGenericMathSymbol = trimmedText == "+" || trimmedText == "-" || trimmedText == "−" || trimmedText == "x" || trimmedText == "X";
+            if (isGenericMathSymbol && !string.IsNullOrWhiteSpace(cssSelector)) return $"locator('{EscapeDoubleQuoted(cssSelector)}').first()";
 
-            if (isGenericMathSymbol && !string.IsNullOrWhiteSpace(cssSelector))
-            {
-                return $"locator('{EscapeDoubleQuoted(cssSelector)}').first()";
-            }
-
-            // 7. Akıllı Metin (Text) Araması (Değişken Destekli)
             if (!string.IsNullOrWhiteSpace(text))
             {
-                string procText = ProcessString(text, out bool hasVar);
-                string quote = hasVar ? "`" : "'"; // Değişken varsa backtick (`), yoksa tek tırnak (')
-                
-                if (tag == "button") return $"locator('button:visible').filter({{ hasText: {quote}{procText}{quote} }}).first()";
-                if (tag == "a") return $"locator('a:visible').filter({{ hasText: {quote}{procText}{quote} }}).first()";
-                
-                return $"locator('{tag}:visible').filter({{ hasText: {quote}{procText}{quote} }}).first()";
+                bool hasDynamicBadge = System.Text.RegularExpressions.Regex.IsMatch(text.Trim(), @"\s+\d+\+?$");
+
+                if (!hasDynamicBadge)
+                {
+                    string procText = ProcessString(text, out bool hasVar);
+                    string targetTag = tag == "button" ? "button:visible" : tag == "a" ? "a:visible" : $"{tag}:visible";
+
+                    if (hasVar)
+                    {
+                        return $"locator(`{targetTag}`).filter({{ hasText: `{procText}` }}).first()";
+                    }
+                    else
+                    {
+                        procText = procText.Replace("\"", "\\\""); 
+                        return $"locator('{targetTag}:text-is(\"{procText}\")').first()";
+                    }
+                }
             }
 
-            // 8. Name Attribute
-            if (!string.IsNullOrWhiteSpace(name))
-            {
-                return $"locator('[name=\"{EscapeDoubleQuoted(name)}\"]').first()";
-            }
-
-            // 9. Css Selector
-            if (!string.IsNullOrWhiteSpace(cssSelector))
-            {
-                return $"locator('{EscapeDoubleQuoted(cssSelector)}').first()";
-            }
+            if (!string.IsNullOrWhiteSpace(name)) return $"locator('[name=\"{EscapeDoubleQuoted(name)}\"]').first()";
+            if (!string.IsNullOrWhiteSpace(cssSelector)) return $"locator('{EscapeDoubleQuoted(cssSelector)}').first()";
 
             return "locator('*').first()";
         }
 
         // ====================================================================
-        // URL ORIGIN
+        // URL ORIGIN & RELATIVE URL
         // ====================================================================
 
-        private string GetOrigin(
-            string url)
+        private string GetOrigin(string url)
         {
-            if (
-                Uri.TryCreate(
-                    url,
-                    UriKind.Absolute,
-                    out Uri? uri)
-            )
-            {
-                return uri.GetLeftPart(
-                    UriPartial.Authority);
-            }
-
+            if (Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)) return uri.GetLeftPart(UriPartial.Authority);
             return "";
         }
 
-        // ====================================================================
-        // RELATIVE URL
-        // ====================================================================
-
-        private string GetRelativeUrl(
-            string url)
+        private string GetRelativeUrl(string url)
         {
-            if (
-                Uri.TryCreate(
-                    url,
-                    UriKind.Absolute,
-                    out Uri? uri)
-            )
+            if (Uri.TryCreate(url, UriKind.Absolute, out Uri? uri))
             {
-                string relative =
-                    uri.AbsolutePath;
-
-                if (
-                    !string.IsNullOrEmpty(
-                        uri.Query)
-                )
-                {
-                    relative +=
-                        uri.Query;
-                }
-
-                if (
-                    !string.IsNullOrEmpty(
-                        uri.Fragment)
-                )
-                {
-                    relative +=
-                        uri.Fragment;
-                }
-
-                return string.IsNullOrEmpty(
-                    relative)
-                        ? "/"
-                        : relative;
+                string relative = uri.AbsolutePath;
+                if (!string.IsNullOrEmpty(uri.Query)) relative += uri.Query;
+                if (!string.IsNullOrEmpty(uri.Fragment)) relative += uri.Fragment;
+                return string.IsNullOrEmpty(relative) ? "/" : relative;
             }
-
-            return
-                string.IsNullOrWhiteSpace(
-                    url)
-                        ? "/"
-                        : url;
+            return string.IsNullOrWhiteSpace(url) ? "/" : url;
         }
 
         // ====================================================================
-        // NAVIGATION WAIT START
+        // NAVIGATION WAYS
         // ====================================================================
 
-        private void EmitNavigationWaitStart(
-            StringBuilder sb,
-            string pageAlias,
-            string promiseName)
+        private void EmitNavigationWaitStart(StringBuilder sb, string pageAlias, string promiseName)
         {
-            sb.AppendLine();
-            sb.AppendLine($"// Aksiyon öncesi URL'nin ana domain (origin) ve path bilgilerini hafızaya alıyoruz.");
-            sb.AppendLine($"const prevUrlObj_{promiseName} = new URL({pageAlias}.url());");
+            sb.AppendLine($"        // Aksiyon öncesi URL'nin ana domain (origin) ve path bilgilerini hafızaya alıyoruz.");
+            sb.AppendLine($"        const prevUrlObj_{promiseName} = new URL({pageAlias}.url());");
         }
 
-        // ====================================================================
-        // NAVIGATION WAIT END
-        // ====================================================================
-        private void EmitNavigationWaitEnd(
-            StringBuilder sb,
-            string pageAlias,
-            string promiseName)
+        private void EmitNavigationWaitEnd(StringBuilder sb, string pageAlias, string promiseName)
         {
-            sb.AppendLine();
-            sb.AppendLine($"// Test anındaki dinamik duruma göre URL'nin değişip değişmeyeceği kontrol ediliyor.");
-            sb.AppendLine($"try {{");
-            sb.AppendLine($"    // Eğer URL değişecekse (farklı modülden gelindiyse) en fazla 3 saniye içinde bunu yakalar ve bekler.");
-            sb.AppendLine($"    await {pageAlias}.waitForURL(url =>");
-            sb.AppendLine($"        url.origin === prevUrlObj_{promiseName}.origin &&");
-            sb.AppendLine($"        url.pathname !== prevUrlObj_{promiseName}.pathname,");
-            sb.AppendLine($"    {{ waitUntil: 'domcontentloaded', timeout: 3000 }});");
-            sb.AppendLine($"}} catch (e) {{");
-            sb.AppendLine($"    // 3 saniye içinde URL değişmediyse, zaten doğru URL'de olduğumuzu anlar.");
-            sb.AppendLine($"    // Bu durumda sadece arayüzün (SPA) yenilenmesini ve ağın sakinleşmesini dinleyip hızla devam eder.");
-            sb.AppendLine($"    await {pageAlias}.waitForLoadState('networkidle', {{ timeout: 3000 }}).catch(() => {{}});");
-            sb.AppendLine($"}}");
+            sb.AppendLine($"        // Test anındaki dinamik duruma göre URL'nin değişip değişmeyeceği kontrol ediliyor.");
+            sb.AppendLine($"        try {{");
+            sb.AppendLine($"            await {pageAlias}.waitForURL(url =>");
+            sb.AppendLine($"                url.origin === prevUrlObj_{promiseName}.origin &&");
+            sb.AppendLine($"                url.pathname !== prevUrlObj_{promiseName}.pathname,");
+            sb.AppendLine($"            {{ waitUntil: 'domcontentloaded', timeout: 3000 }});");
+            sb.AppendLine($"        }} catch (e) {{");
+            sb.AppendLine($"            await {pageAlias}.waitForLoadState('networkidle', {{ timeout: 3000 }}).catch(() => {{}});");
+            sb.AppendLine($"        }}");
         }
 
         // ====================================================================
         // ESCAPE
         // ====================================================================
 
-        private string Escape(
-            string value)
+        private string Escape(string value)
         {
-            if (
-                string.IsNullOrEmpty(
-                    value)
-            )
-            {
-                return "";
-            }
-
-            return value
-                .Replace("\\", "\\\\")
-                .Replace("'", "\\'")
-                .Replace("\r", "\\r")
-                .Replace("\n", "\\n");
+            if (string.IsNullOrEmpty(value)) return "";
+            return value.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\r", "\\r").Replace("\n", "\\n");
         }
 
-        private string EscapeDoubleQuoted(
-            string value)
+        private string EscapeDoubleQuoted(string value)
         {
-            if (
-                string.IsNullOrEmpty(
-                    value)
-            )
-            {
-                return "";
-            }
-
-            return value
-                .Replace("\\", "\\\\")
-                .Replace("\"", "\\\"");
+            if (string.IsNullOrEmpty(value)) return "";
+            return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
     }
 }
