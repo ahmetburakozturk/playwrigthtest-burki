@@ -111,6 +111,9 @@ namespace PlaywrightSmartRecorder.Core.Models
         public string AriaLabel { get; init; } = "";
 
         public string Name { get; init; } = "";
+
+        // Label öğelerinin ilişkilendirildiği kontrolün id değeri.
+        public string ForAttribute { get; init; } = "";
     }
 
     // ========================================================================

@@ -609,6 +609,16 @@ namespace PlaywrightSmartRecorder.Core
                                         el.name ||
                                         '',
 
+                                    forAttribute:
+                                        el.htmlFor ||
+                                        (el.getAttribute
+                                            ? (
+                                                el.getAttribute(
+                                                    'for'
+                                                ) || ''
+                                            )
+                                            : ''),
+
                                     cssSelector:
                                         getCssPath(el),
 
